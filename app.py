@@ -38,24 +38,26 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _speak(text: str) -> None:
-    """Play TTS audio of *text*; silently degrades on any failure."""
-    # Attempt 1: OpenAI TTS (higher quality)
-    try:
-        import openai
+def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
+    """Play TTS audio and return the engine name used ('openai'/'gtts') or 'error: ...'."""
+    if engine in ("openai", "auto"):
+        try:
+            import openai
 
-        client = openai.OpenAI()
-        audio = client.audio.speech.create(
-            model="tts-1",
-            voice="nova",
-            input=text[:4096],
-        )
-        st.audio(audio.content, format="audio/mp3", autoplay=True)
-        return
-    except Exception:
-        pass
+            client = openai.OpenAI()
+            audio = client.audio.speech.create(
+                model="tts-1",
+                voice=voice,
+                input=text[:4096],
+            )
+            st.audio(audio.content, format="audio/mp3", autoplay=True)
+            return "openai"
+        except Exception as exc:
+            if engine == "openai":  # hard-selected — do not fall through
+                return f"error: {exc}"
+            # engine == "auto" — fall through to gTTS
 
-    # Attempt 2: gTTS (offline fallback)
+    # gTTS (fallback or explicit selection)
     try:
         from gtts import gTTS
 
@@ -64,8 +66,9 @@ def _speak(text: str) -> None:
         tts.write_to_fp(buf)
         buf.seek(0)
         st.audio(buf, format="audio/mp3", autoplay=True)
-    except Exception:
-        pass
+        return "gtts"
+    except Exception as exc:
+        return f"error: {exc}"
 
 
 # ── Session state initialisation ──────────────────────────────────────────────
@@ -85,6 +88,29 @@ if "agent_executor" not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Settings")
     voice_output = st.toggle("🔊 Voice Output", value=False)
+
+    if voice_output:
+        tts_engine = st.radio(
+            "TTS Engine",
+            options=["auto", "openai", "gtts"],
+            format_func=lambda x: {
+                "auto": "🤖 Auto (OpenAI → gTTS fallback)",
+                "openai": "✨ OpenAI TTS · tts-1 (higher quality)",
+                "gtts": "🔡 gTTS · Google (free, 500 char limit)",
+            }[x],
+            index=0,
+        )
+        if tts_engine in ("auto", "openai"):
+            tts_voice = st.selectbox(
+                "OpenAI Voice",
+                options=["nova", "alloy", "echo", "fable", "onyx", "shimmer"],
+                index=0,
+            )
+        else:
+            tts_voice = "nova"
+    else:
+        tts_engine = "auto"
+        tts_voice = "nova"
 
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
@@ -196,6 +222,13 @@ if user_input:
         st.markdown(response)
 
         if voice_output:
-            _speak(response)
+            with st.spinner("🔊 Generating audio…"):
+                used = _speak(response, engine=tts_engine, voice=tts_voice)
+            if used.startswith("error"):
+                st.caption(f"⚠️ TTS failed: {used[7:]}")
+            elif used == "openai":
+                st.caption(f"🔊 Spoken via **OpenAI TTS** · voice: `{tts_voice}`")
+            elif used == "gtts":
+                st.caption("🔊 Spoken via **gTTS** (first 500 chars)")
 
     st.session_state.messages.append({"role": "assistant", "content": response})
