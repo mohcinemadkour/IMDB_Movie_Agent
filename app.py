@@ -125,26 +125,32 @@ st.caption(
 with st.expander("🎤 Voice Input", expanded=False):
     try:
         from audio_recorder_streamlit import audio_recorder  # type: ignore
+        import hashlib
 
         audio_data = audio_recorder()
         # WAV header is ~44 bytes; anything shorter means no real audio was recorded.
         if audio_data is not None and len(audio_data) > 1000:
-            import openai
+            # Deduplicate: only transcribe audio that hasn't been processed yet.
+            audio_hash = hashlib.md5(audio_data).hexdigest()
+            if audio_hash != st.session_state.get("_last_audio_hash"):
+                st.session_state["_last_audio_hash"] = audio_hash
+                import openai
 
-            client = openai.OpenAI()
-            try:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
-                    language="en",
-                )
-                transcribed = transcript.text.strip()
-                if transcribed:
-                    st.info(f"Transcribed: **{transcribed}**")
-                    st.session_state["pending_input"] = transcribed
-                    st.rerun()
-            except Exception as exc:
-                st.warning(f"Voice transcription failed: {exc}")
+                client = openai.OpenAI()
+                try:
+                    with st.spinner("Transcribing…"):
+                        transcript = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
+                            language="en",
+                        )
+                    transcribed = transcript.text.strip()
+                    if transcribed:
+                        st.info(f"Transcribed: **{transcribed}**")
+                        st.session_state["pending_input"] = transcribed
+                        st.rerun()
+                except Exception as exc:
+                    st.warning(f"Voice transcription failed: {exc}")
     except ImportError:
         st.info(
             "Voice input is optional.  "
