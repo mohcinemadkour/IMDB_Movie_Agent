@@ -1,0 +1,21 @@
+# Core
+streamlit>=1.40.0
+pandas>=2.0.0
+python-dotenv>=1.0.0
+
+# LLM providers
+openai>=1.50.0
+google-generativeai>=0.8.0
+
+# LangChain agent + tools
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-google-genai>=2.0.0
+langchain-community>=0.3.0
+
+# Vector store
+faiss-cpu>=1.8.0
+
+# Voice I/O
+gTTS>=2.5.0
+audio-recorder-streamlit>=0.0.8

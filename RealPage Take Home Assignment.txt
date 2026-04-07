@@ -1,0 +1,44 @@
+RealPage Take Home Assignment 
+ 
+ 
+Problem Statement: 
+Build a Gen AI powered conversational voice agent that uses the IMDB dataset to answer various questions.  
+Constraints: 
+	• Use Open AI or Gemini API key of an LLM of your choice.
+			§ If you wish to use an LLM of your choice outside of Open AI/Gemini, you'll have to provide API key for testing. 
+	• The final code should be shared in a zipped folder or a GitHub link that can be run locally.  
+			§ Please provide your API key for testing if using paid LLMs. 
+	• If familiar, use the streamlit app for Chat UI or any other UI app of choice.  
+	• If you use a db or vector store, please share the local db/vectorstore file.   
+	• Provide instructions to run the code and the model used.
+	  
+Dataset: imdb_dataset.zip 
+	• Poster_Link - Link of the poster that imdb using 
+	• Series_Title = Name of the movie 
+	• Released_Year - Year at which that movie released 
+	• Certificate - Certificate earned by that movie 
+	• Runtime - Total runtime of the movie 
+	• Genre - Genre of the movie 
+	• IMDB_Rating - Rating of the movie at IMDB site 
+	• Overview - mini story/ summary 
+	• Meta_score - Score earned by the movie 
+	• Director - Name of the Director 
+	• Star1, Star2, Star3, Star4 - Name of the Stars 
+	• No_of_votes - Total number of votes 
+	• Gross - Money earned by that movie 
+  
+Test Questions (not limited to): 
+	1. When did The Matrix release?  
+	2. What are the top 5 movies of 2019 by meta score? 
+	3. Top 7 comedy movies between 2010-2020 by IMDB rating? 
+	4. Top horror movies with a meta score above 85 and IMDB rating above 8 
+	5. Top directors and their highest grossing movies with gross earnings of greater than 500M at least twice. 
+	6. Top 10 movies with over 1M votes but lower gross earnings. 
+	7. List of movies from the comedy genre where there is death or dead people involved. (Hint: Use Overview column) 
+	8. Summarize the movie plots of Steven Spielberg’s top-rated sci-fi movies. 
+	9. List of movies before 1990 that have involvement of police in the plot (Hint: this needs to be based on similarity search and not just the word 'police')
+ 
+Nice to haves: Provide reasoning and suggestions along with responses.
+	1.  List of Al Pacino movies that have grossed over $50M and IMDB rating of 8 or higher.
+		Bot asks "Are you looking for movies in which Al Pacino is the lead actor (Col. Star1) or movies in which Al Pacino has acted as a lead or otherwise", and based on user's answer bot provides a response.
+	2. Bot also provides recommendations on movies with Meta scores and IMDB ratings that are similar to the user query response.
