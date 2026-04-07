@@ -227,3 +227,51 @@ To switch models, update `.env`:
 ```dotenv
 OPENAI_MODEL=gpt-4o-mini
 ```
+
+---
+
+## Conversational Context — How Chat History is Maintained
+
+The agent maintains full conversation context through two cooperating mechanisms.
+
+### 1. Streamlit session state stores the full chat history
+
+Every message is appended to `st.session_state.messages` — a plain list of dicts that persists for the lifetime of the browser session:
+
+```python
+# After user sends a message:
+st.session_state.messages.append({"role": "user", "content": user_input})
+
+# After agent replies:
+st.session_state.messages.append({"role": "assistant", "content": response})
+```
+
+On every Streamlit rerun, the full list is iterated and rendered with `st.chat_message`, so the UI always shows the complete conversation.
+
+### 2. The full history is passed to the agent on every call
+
+`run_agent` receives `messages[:-1]` — everything except the current message:
+
+```python
+response = run_agent(
+    st.session_state.agent_executor,
+    user_input,
+    st.session_state.messages[:-1],  # full prior history
+)
+```
+
+In `agent/agent.py`, `format_chat_history` converts those dicts into LangChain message objects, then prepends them to the new message:
+
+```python
+def run_agent(executor, user_input, chat_history):
+    history = format_chat_history(chat_history)   # → [HumanMessage, AIMessage, ...]
+    messages = history + [HumanMessage(content=user_input)]
+    result = executor.invoke({"messages": messages})
+    return result["messages"][-1].content
+```
+
+The LangGraph agent receives the **entire conversation thread** as its `messages` input on every turn, giving GPT-4o full context of what was asked and answered before.
+
+### Key Limitation
+
+There is no summarization or truncation — the full raw history is sent to the LLM every time. This works fine for typical sessions, but for very long conversations it will eventually hit the model's context window limit (~128k tokens for GPT-4o, so not a practical concern for this use case).

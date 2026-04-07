@@ -34,11 +34,12 @@ def _get_vectorstore():
     return _vectorstore
 
 
-def _format_results(df: pd.DataFrame, max_rows: int = 10) -> str:
+def _format_results(df: pd.DataFrame, max_rows: int = 200) -> str:
     """Render a subset of columns as a readable string."""
     if df.empty:
         return "No results found matching the given criteria."
 
+    total = len(df)
     display_cols = [
         "Series_Title", "Released_Year", "Genre",
         "IMDB_Rating", "Meta_score", "Director", "Gross",
@@ -51,7 +52,12 @@ def _format_results(df: pd.DataFrame, max_rows: int = 10) -> str:
             lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A"
         )
 
-    return subset.to_string(index=False)
+    result = subset.to_string(index=False)
+    if total > max_rows:
+        result += f"\n\n(Showing {max_rows} of {total} total results. Use a higher `limit` or add filters to narrow down.)"
+    else:
+        result += f"\n\n(Total: {total} movies)"
+    return result
 
 
 # ── Tool 1: Structured query ──────────────────────────────────────────────────
@@ -77,7 +83,9 @@ def structured_query(query_json: str) -> str:
       star1_only  (bool)  If true AND star is set, restrict search to Star1 (lead only).
       sort_by        (str)   Column to sort by (default: "IMDB_Rating").
       sort_ascending (bool)  Sort ascending instead of descending (default: false).
-      limit          (int)   Max rows to return (default: 10).
+      limit          (int)   Max rows to return. Default is 500 (all results).
+                             ONLY set this when the user explicitly asks for "top N" or a specific number.
+                             For "all", "every", or general queries — do NOT set limit, let it default to 500.
       count_only     (bool)  If true, return only the total count — do not list movies.
                              Use this for "how many" questions.
 
@@ -147,7 +155,10 @@ def structured_query(query_json: str) -> str:
     if sort_col in df.columns:
         df = df.sort_values(sort_col, ascending=ascending)
 
-    limit = int(params.get("limit", 10))
+    # Default to all results; LLM can pass a smaller limit for "top N" queries
+    limit = int(params.get("limit", 500))
+    # Safety cap: never return more than 500 rows in a single response
+    limit = min(limit, 500)
     return _format_results(df, max_rows=limit)
 
 

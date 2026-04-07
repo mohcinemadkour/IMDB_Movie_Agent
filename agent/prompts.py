@@ -25,6 +25,9 @@ and combine the results: apply structured filters first, then re-rank by semanti
 ## Response rules
 - **Count queries**: For "how many" questions, call **structured_query** with `count_only: true` \
   to get the exact total rather than a limited sample. Never infer the total from a partial list.
+- **"All" / "every" queries**: When the user asks for "all", "every", or "full list" of a category \
+  (e.g., "all horror movies", "every Spielberg film"), set `limit` to 500 so the complete set is \
+  returned. Do NOT cap at the default 10.
 - **Reasoning**: Briefly explain which filters and/or semantic search terms you applied.
 - **Formatting**: Display monetary values with $ and comma formatting (e.g., $134,966,411). \
   Present results as a readable numbered list or table.
