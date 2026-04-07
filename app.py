@@ -117,6 +117,52 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+    st.markdown("**🎤 Voice Input**")
+    try:
+        from audio_recorder_streamlit import audio_recorder  # type: ignore
+        import hashlib
+
+        audio_data = audio_recorder(
+            text="Click to record",
+            icon_size="2x",
+            neutral_color="#6C757D",
+            recording_color="#E74C3C",
+            key="mic_sidebar",
+        )
+        if audio_data is not None and len(audio_data) > 1000:
+            audio_hash = hashlib.md5(audio_data).hexdigest()
+            if audio_hash != st.session_state.get("_last_audio_hash"):
+                st.session_state["_last_audio_hash"] = audio_hash
+                import openai
+                client = openai.OpenAI()
+                try:
+                    with st.spinner("Transcribing…"):
+                        transcript = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
+                            language="en",
+                            prompt="IMDB, movie titles, director names, genres like Horror, Comedy, Sci-Fi, actor names",
+                            response_format="verbose_json",
+                        )
+                    segments = getattr(transcript, "segments", []) or []
+                    avg_no_speech = (
+                        sum(getattr(s, "no_speech_prob", 0) for s in segments) / len(segments)
+                        if segments else 0.0
+                    )
+                    transcribed = (transcript.text or "").strip()
+                    if avg_no_speech >= 0.6 or not transcribed:
+                        st.warning(f"⚠️ Low confidence ({avg_no_speech:.0%}). Re-record.")
+                        st.session_state.pop("_last_audio_hash", None)
+                    else:
+                        st.success(f"🎙️ *{transcribed}*")
+                        st.session_state["pending_input"] = transcribed
+                        st.rerun()
+                except Exception as exc:
+                    st.warning(f"Transcription failed: {exc}")
+    except ImportError:
+        st.caption("Install `audio-recorder-streamlit` to enable voice input.")
+
+    st.divider()
     st.markdown("**📋 Example Questions**")
 
     _examples = [
@@ -146,103 +192,6 @@ st.caption(
 )
 
 
-# ── Voice input (optional) ────────────────────────────────────────────────────
-
-with st.expander("🎤 Voice Input", expanded=False):
-    try:
-        from audio_recorder_streamlit import audio_recorder  # type: ignore
-        import hashlib
-
-        audio_data = audio_recorder()
-        # WAV header is ~44 bytes; anything shorter means no real audio was recorded.
-        if audio_data is not None and len(audio_data) > 1000:
-            # Deduplicate: only transcribe audio that hasn't been processed yet.
-            audio_hash = hashlib.md5(audio_data).hexdigest()
-            if audio_hash != st.session_state.get("_last_audio_hash"):
-                st.session_state["_last_audio_hash"] = audio_hash
-                import openai
-
-                client = openai.OpenAI()
-                try:
-                    with st.spinner("Transcribing…"):
-                        transcript = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
-                            language="en",
-                            prompt="IMDB, movie titles, director names, genres like Horror, Comedy, Sci-Fi, actor names",
-                            response_format="verbose_json",
-                        )
-
-                    # ── Option 2: confidence-based quality check ──────────────
-                    # verbose_json returns segments with no_speech_prob per chunk.
-                    # If ALL segments are likely silence/noise, warn and skip.
-                    segments = getattr(transcript, "segments", []) or []
-                    avg_no_speech = (
-                        sum(getattr(s, "no_speech_prob", 0) for s in segments) / len(segments)
-                        if segments else 0.0
-                    )
-                    LOW_CONFIDENCE_THRESHOLD = 0.6
-
-                    transcribed = (transcript.text or "").strip()
-
-                    if avg_no_speech >= LOW_CONFIDENCE_THRESHOLD or not transcribed:
-                        st.warning(
-                            f"⚠️ Low confidence transcription (silence probability: "
-                            f"{avg_no_speech:.0%}). Please re-record more clearly."
-                        )
-                        st.session_state.pop("_last_audio_hash", None)
-                    else:
-                        # Show per-segment confidence as an expander for transparency
-                        if segments:
-                            with st.expander("📊 Transcription confidence", expanded=False):
-                                for seg in segments:
-                                    prob = getattr(seg, "no_speech_prob", 0)
-                                    bar = "🟢" if prob < 0.2 else ("🟡" if prob < 0.5 else "🔴")
-                                    st.caption(
-                                        f"{bar} `{getattr(seg, 'text', '').strip()}` "
-                                        f"— silence prob: {prob:.0%}"
-                                    )
-                        # ── Confirmation step: let user verify before sending ──
-                        st.session_state["_pending_transcription"] = transcribed
-
-                except Exception as exc:
-                    st.warning(f"Voice transcription failed: {exc}")
-
-        # ── Show confirmation widget whenever a transcription is pending ──────
-        if "pending_transcription" in st.session_state:
-            pending_text = st.session_state["_pending_transcription"]
-        elif "_pending_transcription" in st.session_state:
-            pending_text = st.session_state["_pending_transcription"]
-        else:
-            pending_text = None
-
-        if pending_text:
-            st.info(f"🎙️ Transcribed: **{pending_text}**")
-            edited = st.text_input(
-                "✏️ Edit if needed, then confirm:",
-                value=pending_text,
-                key="voice_edit_box",
-            )
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Send", use_container_width=True, key="voice_send"):
-                    del st.session_state["_pending_transcription"]
-                    st.session_state["pending_input"] = edited.strip()
-                    st.rerun()
-            with col2:
-                if st.button("🗑️ Discard", use_container_width=True, key="voice_discard"):
-                    del st.session_state["_pending_transcription"]
-                    # Reset audio hash so the same clip can be re-recorded
-                    st.session_state.pop("_last_audio_hash", None)
-                    st.rerun()
-    except ImportError:
-        st.info(
-            "Voice input is optional.  "
-            "Install `audio-recorder-streamlit` to enable it: "
-            "`pip install audio-recorder-streamlit`"
-        )
-
-
 # ── Chat history ──────────────────────────────────────────────────────────────
 
 for _msg in st.session_state.messages:
@@ -250,12 +199,11 @@ for _msg in st.session_state.messages:
         st.markdown(_msg["content"])
 
 
+
+
 # ── Input handling ────────────────────────────────────────────────────────────
 
-_pending = st.session_state.get("pending_input")
-if _pending:
-    del st.session_state["pending_input"]
-
+_pending = st.session_state.pop("pending_input", None)
 user_input: str | None = st.chat_input("Ask about movies…") or _pending
 
 if user_input:
