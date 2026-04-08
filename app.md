@@ -275,3 +275,109 @@ The LangGraph agent receives the **entire conversation thread** as its `messages
 ### Key Limitation
 
 There is no summarization or truncation — the full raw history is sent to the LLM every time. This works fine for typical sessions, but for very long conversations it will eventually hit the model's context window limit (~128k tokens for GPT-4o, so not a practical concern for this use case).
+
+---
+
+## Voice Architecture
+
+### Voice Input Pipeline
+
+```
+Browser mic (WebRTC)
+        │
+        ▼
+audio-recorder-streamlit widget
+  → Returns raw WAV bytes to Python on each Streamlit rerun
+        │
+        ▼
+Guard: len(bytes) > 1000  (skip WAV-header-only clips)
+        │
+        ▼
+MD5 deduplication  (skip if same clip already processed)
+        │
+        ▼
+OpenAI Whisper API  (whisper-1)
+  - format: verbose_json  → returns TranscriptionSegment objects
+  - language: "en"
+  - prompt: IMDB domain hint (improves accuracy on movie vocab)
+        │
+        ├── avg no_speech_prob ≥ 0.6  →  ⚠️ warning, hash reset
+        │
+        └── Confidence OK
+              → st.session_state["pending_input"] = transcribed text
+              → st.rerun()  triggers agent like a typed message
+```
+
+**Key components:**
+
+| Component | Role |
+|-----------|------|
+| `audio-recorder-streamlit` | Browser mic widget — captures via WebRTC, returns WAV bytes |
+| `hashlib.md5` | Dedup — prevents the same clip re-transcribing on every Streamlit rerun |
+| `openai.audio.transcriptions.create` | Whisper STT — converts WAV bytes to text |
+| `verbose_json` response format | Returns per-segment `no_speech_prob` for confidence scoring |
+| `pending_input` session key | Bridge between voice and the normal text input handler |
+
+---
+
+### Voice Output Pipeline
+
+```
+Agent response text
+        │
+        ▼
+_speak(text, engine, voice)
+        │
+        ├── engine = "openai" or "auto"
+        │       → openai.audio.speech.create(model="tts-1", voice=voice, input=text[:4096])
+        │       → returns MP3 bytes
+        │       → st.audio(bytes, format="audio/mp3", autoplay=True)
+        │
+        └── engine = "gtts" (or OpenAI failed in "auto" mode)
+                → gTTS(text[:500], lang="en")
+                → writes to io.BytesIO buffer
+                → st.audio(buffer, format="audio/mp3", autoplay=True)
+```
+
+**Key components:**
+
+| Component | Role |
+|-----------|------|
+| `openai.audio.speech` (`tts-1`) | High-quality neural TTS; 6 voices; 4096 char limit |
+| `gTTS` | Google TTS fallback; free, no key needed; 500 char limit |
+| `st.audio(..., autoplay=True)` | Plays audio inline in the browser without a page reload |
+| Sidebar engine radio | User picks: Auto (OpenAI → gTTS fallback) / OpenAI / gTTS |
+| Sidebar voice selector | Picks OpenAI voice: nova / alloy / echo / fable / onyx / shimmer |
+
+---
+
+### End-to-End Voice Flow
+
+```
+[User speaks]
+     ↓
+audio-recorder-streamlit (WebRTC capture)
+     ↓
+OpenAI Whisper whisper-1 (STT → text)
+     ↓
+pending_input → st.chat_input handler
+     ↓
+LangGraph agent (GPT-4o + tools)
+     ↓
+response text → st.markdown (displayed)
+     ↓
+openai tts-1 / gTTS (TTS → MP3)
+     ↓
+st.audio autoplay (user hears the answer)
+```
+
+---
+
+### Confidence Scoring
+
+`verbose_json` returns `TranscriptionSegment` Pydantic objects. The average `no_speech_prob` across all segments is computed:
+
+- `< 0.6` → proceed, show `🎙️ transcribed text` in sidebar
+- `≥ 0.6` → warn user, reset hash so they can re-record
+
+This prevents hallucinated transcriptions from background noise or accidental clicks being sent to the agent.
