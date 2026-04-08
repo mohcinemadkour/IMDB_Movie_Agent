@@ -119,6 +119,32 @@ requirements.txt
 
 ---
 
+## Docker
+
+### Build and run with Docker Compose (recommended)
+
+```bash
+# 1. Copy env file and add your API key
+cp .env.example .env
+# edit .env — set OPENAI_API_KEY
+
+# 2. Build and start
+docker compose up --build
+
+# 3. Open http://localhost:8501
+```
+
+Logs are persisted to `./logs/app.log` on the host via a volume mount.
+
+### Build and run manually
+
+```bash
+docker build -t imdb-movie-agent .
+docker run -p 8501:8501 --env-file .env imdb-movie-agent
+```
+
+---
+
 ## Observability (LangSmith)
 
 LangChain and LangGraph emit traces automatically when the following variables are set in `.env`:

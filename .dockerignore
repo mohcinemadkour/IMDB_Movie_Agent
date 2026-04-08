@@ -1,0 +1,28 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment secrets — never bake into the image
+.env
+
+# Logs — mounted as a volume at runtime
+logs/
+
+# Streamlit local config
+.streamlit/
+
+# Dev/docs artefacts
+*.md
+*.pptx
+*.txt
+checklist.md
+nextsteps.md
+app.md

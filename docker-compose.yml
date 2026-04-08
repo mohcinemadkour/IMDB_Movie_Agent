@@ -1,0 +1,28 @@
+services:
+  imdb-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: imdb-movie-agent:local
+    container_name: imdb-agent
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env                  # loads OPENAI_API_KEY, LOG_LEVEL, etc.
+    environment:
+      # Override any .env values here for local dev if needed
+      LOG_LEVEL: "INFO"
+      LOG_FILE: "logs/app.log"
+    volumes:
+      # Persist logs outside the container
+      - ./logs:/app/logs
+      # Mount FAISS index so rebuilds are cached on the host
+      - ./data/faiss_index:/app/data/faiss_index
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
