@@ -36,6 +36,10 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
     st.stop()
 
 
+# ── Imports (deferred agent import after session-state init) ─────────────────
+from agent.agent import run_agent  # noqa: E402  (module loaded at first import)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
@@ -71,6 +75,40 @@ def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
         return f"error: {exc}"
 
 
+def _transcribe_audio(audio_data: bytes) -> None:
+    """Transcribe audio via Whisper and store result in pending_input.
+
+    On success sets st.session_state["pending_input"] and calls st.rerun().
+    On low confidence or failure shows a warning inline.
+    """
+    import openai
+
+    try:
+        with st.spinner("Transcribing…"):
+            transcript = openai.OpenAI().audio.transcriptions.create(
+                model="whisper-1",
+                file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
+                language="en",
+                prompt="IMDB, movie titles, director names, genres like Horror, Comedy, Sci-Fi, actor names",
+                response_format="verbose_json",
+            )
+        segments = getattr(transcript, "segments", []) or []
+        avg_no_speech = (
+            sum(getattr(s, "no_speech_prob", 0) for s in segments) / len(segments)
+            if segments else 0.0
+        )
+        transcribed = (transcript.text or "").strip()
+        if avg_no_speech >= 0.6 or not transcribed:
+            st.warning(f"⚠️ Low confidence ({avg_no_speech:.0%}). Please re-record.")
+            st.session_state.pop("_last_audio_hash", None)
+        else:
+            st.success(f"🎙️ *{transcribed}*")
+            st.session_state["pending_input"] = transcribed
+            st.rerun()
+    except Exception as exc:
+        st.warning(f"Transcription failed: {exc}")
+
+
 # ── Session state initialisation ──────────────────────────────────────────────
 
 if "messages" not in st.session_state:
@@ -78,7 +116,6 @@ if "messages" not in st.session_state:
 
 if "agent_executor" not in st.session_state:
     from agent.agent import build_agent_executor
-
     with st.spinner("🔧 Loading IMDB Agent (first run may build the vector index)…"):
         st.session_state.agent_executor = build_agent_executor()
 
@@ -133,32 +170,7 @@ with st.sidebar:
             audio_hash = hashlib.md5(audio_data).hexdigest()
             if audio_hash != st.session_state.get("_last_audio_hash"):
                 st.session_state["_last_audio_hash"] = audio_hash
-                import openai
-                client = openai.OpenAI()
-                try:
-                    with st.spinner("Transcribing…"):
-                        transcript = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
-                            language="en",
-                            prompt="IMDB, movie titles, director names, genres like Horror, Comedy, Sci-Fi, actor names",
-                            response_format="verbose_json",
-                        )
-                    segments = getattr(transcript, "segments", []) or []
-                    avg_no_speech = (
-                        sum(getattr(s, "no_speech_prob", 0) for s in segments) / len(segments)
-                        if segments else 0.0
-                    )
-                    transcribed = (transcript.text or "").strip()
-                    if avg_no_speech >= 0.6 or not transcribed:
-                        st.warning(f"⚠️ Low confidence ({avg_no_speech:.0%}). Re-record.")
-                        st.session_state.pop("_last_audio_hash", None)
-                    else:
-                        st.success(f"🎙️ *{transcribed}*")
-                        st.session_state["pending_input"] = transcribed
-                        st.rerun()
-                except Exception as exc:
-                    st.warning(f"Transcription failed: {exc}")
+                _transcribe_audio(audio_data)
     except ImportError:
         st.caption("Install `audio-recorder-streamlit` to enable voice input.")
 
@@ -199,8 +211,6 @@ for _msg in st.session_state.messages:
         st.markdown(_msg["content"])
 
 
-
-
 # ── Input handling ────────────────────────────────────────────────────────────
 
 _pending = st.session_state.pop("pending_input", None)
@@ -215,8 +225,6 @@ if user_input:
     # Run agent and display response
     with st.chat_message("assistant"):
         with st.spinner("Thinking…"):
-            from agent.agent import run_agent
-
             try:
                 response = run_agent(
                     st.session_state.agent_executor,
