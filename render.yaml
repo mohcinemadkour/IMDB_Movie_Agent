@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: imdb-movie-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false          # you supply this in the Render dashboard
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_MODEL
+        value: gpt-4o
+      - key: LLM_CACHE
+        value: memory        # no persistent disk on free tier; use in-memory cache
+      - key: LOG_LEVEL
+        value: INFO
+    healthCheckPath: /_stcore/health
