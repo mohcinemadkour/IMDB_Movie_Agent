@@ -16,6 +16,9 @@ env/
 # Logs — mounted as a volume at runtime
 logs/
 
+# LLM cache — rebuilt at runtime
+.cache/
+
 # Streamlit local config
 .streamlit/
 
