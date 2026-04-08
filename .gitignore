@@ -12,8 +12,8 @@ env/
 # Vector store index (large binary files — share separately)
 data/faiss_index/
 
-# Streamlit cache
-.streamlit/
+# Streamlit runtime cache (but commit config.toml for deployment)
+.streamlit/credentials.toml
 
 # Application logs
 logs/
