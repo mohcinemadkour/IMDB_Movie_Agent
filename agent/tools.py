@@ -19,9 +19,27 @@ from data.vectorstore import get_vectorstore
 
 _LOG = logging.getLogger(__name__)
 
-# Module-level singletons — initialised lazily on first tool call.
+# Module-level singletons.
+# Populated either by init_tool_singletons() (Streamlit path, uses
+# @st.cache_resource objects) or lazily on first tool call (CLI / test path).
 _df: pd.DataFrame | None = None
 _vectorstore = None
+
+
+def init_tool_singletons(df: pd.DataFrame, vectorstore) -> None:
+    """Pre-populate module singletons with already-loaded shared objects.
+
+    Call this once at app startup (after @st.cache_resource has loaded the
+    DataFrame and vector store) so that all tool calls in every session share
+    the same in-memory objects without re-loading them.
+    """
+    global _df, _vectorstore
+    _df = df
+    _vectorstore = vectorstore
+    _LOG.info(
+        "Tool singletons initialised",
+        extra={"df_rows": len(df), "vectorstore_type": type(vectorstore).__name__},
+    )
 
 
 def _get_df() -> pd.DataFrame:

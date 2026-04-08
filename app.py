@@ -51,6 +51,34 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 
 # ── Imports (deferred agent import after session-state init) ─────────────────
 from agent.agent import run_agent, stream_agent  # noqa: E402  (module loaded at first import)
+from agent.tools import init_tool_singletons     # noqa: E402
+
+
+# ── Process-level shared resource cache ──────────────────────────────────────
+# @st.cache_resource loads each object exactly ONCE per Streamlit worker process
+# and shares it across all browser sessions.  The DataFrame and vector store are
+# read-only after startup so sharing is safe.  The agent executor (which holds
+# per-session conversation state) must NOT be cached here — it lives in
+# st.session_state so each browser tab gets its own isolated copy.
+
+@st.cache_resource(show_spinner="📊 Loading IMDB dataset…")
+def _load_shared_df():
+    from data.loader import load_data
+    return load_data()
+
+
+@st.cache_resource(show_spinner="🔍 Loading vector index…")
+def _load_shared_vectorstore():
+    from data.vectorstore import get_vectorstore
+    # _load_shared_df() is already cached; calling it here is a cache hit.
+    return get_vectorstore(_load_shared_df())
+
+
+# Populate tool module globals with the shared objects.
+# Subsequent calls are instant (singletons already set).
+_shared_df = _load_shared_df()
+_shared_vs = _load_shared_vectorstore()
+init_tool_singletons(_shared_df, _shared_vs)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -153,7 +181,7 @@ if "session_cost_usd" not in st.session_state:
 
 if "agent_executor" not in st.session_state:
     from agent.agent import build_agent_executor
-    with st.spinner("🔧 Loading IMDB Agent (first run may build the vector index)…"):
+    with st.spinner("🔧 Building agent executor…"):
         st.session_state.agent_executor = build_agent_executor()
 
 
