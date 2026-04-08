@@ -19,6 +19,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from agent.prompts import SYSTEM_PROMPT
 from agent.tools import get_tools
 
+# Maximum LangGraph recursion steps (each tool call + LLM call = 2 steps).
+# Prevents runaway agents from generating unbounded API spend.
+MAX_AGENT_ITERATIONS = 10
+
 
 def _build_llm():
     provider = os.getenv("LLM_PROVIDER", "openai").lower()
@@ -64,9 +68,30 @@ def run_agent(
     executor,
     user_input: str,
     chat_history: list[dict],
-) -> str:
-    """Invoke the agent and return its text response."""
+) -> tuple[str, dict]:
+    """Invoke the agent and return (response_text, usage_dict).
+
+    usage_dict keys: prompt_tokens, completion_tokens, total_tokens (ints).
+    Values are 0 when the provider does not return usage metadata.
+    """
     history = format_chat_history(chat_history)
     messages = history + [HumanMessage(content=user_input)]
-    result = executor.invoke({"messages": messages})
-    return result["messages"][-1].content
+    result = executor.invoke(
+        {"messages": messages},
+        config={"recursion_limit": MAX_AGENT_ITERATIONS},
+    )
+    last_msg = result["messages"][-1]
+    response_text = last_msg.content
+
+    # OpenAI responses carry token counts in response_metadata.
+    usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    meta = getattr(last_msg, "response_metadata", {}) or {}
+    token_usage = meta.get("token_usage", {})
+    if token_usage:
+        usage = {
+            "prompt_tokens": token_usage.get("prompt_tokens", 0),
+            "completion_tokens": token_usage.get("completion_tokens", 0),
+            "total_tokens": token_usage.get("total_tokens", 0),
+        }
+
+    return response_text, usage

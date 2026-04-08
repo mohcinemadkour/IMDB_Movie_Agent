@@ -25,6 +25,9 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Constants ────────────────────────────────────────────────────────────────
+MAX_INPUT_CHARS = 2000  # truncate user input before sending to the LLM
+
 # ── API key guard ─────────────────────────────────────────────────────────────
 if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
     st.error(
@@ -114,6 +117,12 @@ def _transcribe_audio(audio_data: bytes) -> None:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "session_tokens" not in st.session_state:
+    st.session_state.session_tokens = 0
+
+if "session_cost_usd" not in st.session_state:
+    st.session_state.session_cost_usd = 0.0
+
 if "agent_executor" not in st.session_state:
     from agent.agent import build_agent_executor
     with st.spinner("🔧 Loading IMDB Agent (first run may build the vector index)…"):
@@ -151,7 +160,16 @@ with st.sidebar:
 
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.session_tokens = 0
+        st.session_state.session_cost_usd = 0.0
         st.rerun()
+
+    st.divider()
+    if st.session_state.session_tokens > 0:
+        st.caption(
+            f"**Session usage:** {st.session_state.session_tokens:,} tokens · "
+            f"~${st.session_state.session_cost_usd:.4f}"
+        )
 
     st.divider()
     st.markdown("**🎤 Voice Input**")
@@ -217,6 +235,14 @@ _pending = st.session_state.pop("pending_input", None)
 user_input: str | None = st.chat_input("Ask about movies…") or _pending
 
 if user_input:
+    # Enforce input length cap
+    if len(user_input) > MAX_INPUT_CHARS:
+        st.warning(
+            f"⚠️ Your message was truncated to {MAX_INPUT_CHARS} characters "
+            f"(original: {len(user_input):,} chars)."
+        )
+        user_input = user_input[:MAX_INPUT_CHARS]
+
     # Display user message
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -226,13 +252,22 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("Thinking…"):
             try:
-                response = run_agent(
+                response, usage = run_agent(
                     st.session_state.agent_executor,
                     user_input,
                     st.session_state.messages[:-1],  # history excludes current message
                 )
             except Exception as exc:
                 response = f"⚠️ Something went wrong: {exc}\n\nPlease try rephrasing your question."
+                usage = {}
+
+        # Accumulate session token usage (GPT-4o pricing: $2.50/1M prompt, $10/1M completion)
+        if usage.get("total_tokens"):
+            st.session_state.session_tokens += usage["total_tokens"]
+            st.session_state.session_cost_usd += (
+                usage.get("prompt_tokens", 0) * 2.50 / 1_000_000
+                + usage.get("completion_tokens", 0) * 10.00 / 1_000_000
+            )
         st.markdown(response)
 
         if voice_output:
