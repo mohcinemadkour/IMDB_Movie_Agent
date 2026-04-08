@@ -221,16 +221,18 @@ def stream_agent(
         config={"recursion_limit": MAX_AGENT_ITERATIONS},
         stream_mode="messages",
     ):
-        if not isinstance(chunk, AIMessageChunk):
+        if not isinstance(chunk, AIMessage):
             # ToolMessage / HumanMessage echoes — ignore
+            # AIMessageChunk is a subclass of AIMessage, so this accepts both
+            # streaming (AIMessageChunk) and non-streaming (AIMessage) backends.
             continue
 
-        if getattr(chunk, "tool_call_chunks", None):
+        if getattr(chunk, "tool_call_chunks", None) or getattr(chunk, "tool_calls", None):
             # Agent is deciding which tool to call — skip these tokens
             continue
 
-        # Track every non-tool AIMessageChunk; the final one (empty content,
-        # finish_reason="stop") carries token-usage metadata from the API.
+        # Track every non-tool AI message/chunk; the terminal streaming chunk
+        # (empty content, finish_reason="stop") carries token-usage metadata.
         last_response_chunk = chunk
 
         if isinstance(chunk.content, str) and chunk.content:
