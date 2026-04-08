@@ -50,9 +50,8 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 
 
 # ── Imports (deferred agent import after session-state init) ─────────────────
-from agent.agent import run_agent, stream_agent  # noqa: E402  (module loaded at first import)
-from agent.tools import init_tool_singletons     # noqa: E402
-
+from agent.agent import stream_agent  # noqa: E402  (module loaded at first import)
+from agent.tools import init_tool_singletons  # noqa: E402
 
 # ── Process-level shared resource cache ──────────────────────────────────────
 # @st.cache_resource loads each object exactly ONCE per Streamlit worker process
@@ -230,8 +229,9 @@ with st.sidebar:
     st.divider()
     st.markdown("**🎤 Voice Input**")
     try:
-        from audio_recorder_streamlit import audio_recorder  # type: ignore
         import hashlib
+
+        from audio_recorder_streamlit import audio_recorder  # type: ignore
 
         audio_data = audio_recorder(
             text="Click to record",

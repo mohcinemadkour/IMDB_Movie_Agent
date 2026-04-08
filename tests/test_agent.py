@@ -11,13 +11,11 @@ pre-canned message so we can verify:
   - Token usage dict has the expected keys
 """
 
-import json
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-
 
 # ---------------------------------------------------------------------------
 # Stub LLM — returns a fixed AIMessage for any invocation
@@ -129,7 +127,7 @@ class TestStreamAgentScenarios:
 
     def test_stream_agent_concatenated_equals_full_response(self, agent_executor):
         """Concatenating all yielded tokens should be the complete response."""
-        from agent.agent import stream_agent, run_agent
+        from agent.agent import stream_agent
         tokens = list(stream_agent(agent_executor, "When did The Matrix release?", []))
         streamed = "".join(tokens)
         assert len(streamed) > 0
@@ -146,6 +144,7 @@ class TestFormatChatHistory:
 
     def test_user_becomes_human_message(self):
         from langchain_core.messages import HumanMessage
+
         from agent.agent import format_chat_history
         result = format_chat_history([{"role": "user", "content": "hello"}])
         assert len(result) == 1
@@ -154,13 +153,15 @@ class TestFormatChatHistory:
 
     def test_assistant_becomes_ai_message(self):
         from langchain_core.messages import AIMessage
+
         from agent.agent import format_chat_history
         result = format_chat_history([{"role": "assistant", "content": "hi there"}])
         assert len(result) == 1
         assert isinstance(result[0], AIMessage)
 
     def test_alternating_history(self):
-        from langchain_core.messages import HumanMessage, AIMessage
+        from langchain_core.messages import AIMessage, HumanMessage
+
         from agent.agent import format_chat_history
         history = [
             {"role": "user", "content": "q1"},

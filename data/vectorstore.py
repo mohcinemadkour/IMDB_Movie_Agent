@@ -96,8 +96,8 @@ def _get_faiss(df: pd.DataFrame, force_rebuild: bool = False):
 
 def _get_pinecone(df: pd.DataFrame, force_rebuild: bool = False):
     try:
-        from pinecone import Pinecone, ServerlessSpec
         from langchain_pinecone import PineconeVectorStore
+        from pinecone import Pinecone, ServerlessSpec
     except ImportError as exc:
         raise ImportError(
             "pinecone and langchain-pinecone are required for the Pinecone backend.\n"

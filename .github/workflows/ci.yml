@@ -1,0 +1,54 @@
+name: CI
+
+# Run on every pull request targeting master and on direct pushes to master.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  quality:
+    name: Lint, type-check & test
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Source ─────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python runtime ─────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ── 3. Dependency cache (keyed on requirements.txt) ───────────────────
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # ── 4. Install all dependencies (app + dev tools) ─────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 5. Ruff — lint ────────────────────────────────────────────────────
+      - name: Ruff — lint
+        run: ruff check agent/ data/ tests/ app.py
+
+      # ── 6. Mypy — type check (source modules only; tests are untyped) ─────
+      - name: Mypy — type check
+        run: mypy agent/ data/
+
+      # ── 7. Pytest — unit tests ────────────────────────────────────────────
+      - name: Pytest — unit tests
+        env:
+          # Tests mock all LLM/API calls; a non-empty key is required only to
+          # satisfy any env-var presence checks at import time.
+          OPENAI_API_KEY: dummy-key-for-ci
+          GOOGLE_API_KEY: dummy-key-for-ci
+        run: pytest tests/ -q

@@ -7,15 +7,15 @@ vector store by using the sample_df / mock_vectorstore conftest fixtures.
 """
 
 import json
+
 import pytest
-from unittest.mock import patch
 
 from agent.tools import (
-    structured_query,
-    semantic_search,
     director_gross_summary,
-    init_tool_singletons,
     get_tools,
+    init_tool_singletons,
+    semantic_search,
+    structured_query,
 )
 
 
@@ -217,8 +217,9 @@ class TestSemanticSearch:
         assert "Dir:" in result
 
     def test_no_results_message(self):
-        import agent.tools as _t
         from unittest.mock import MagicMock
+
+        import agent.tools as _t
         empty_vs = MagicMock()
         empty_vs.similarity_search.return_value = []
         _t._vectorstore = empty_vs
@@ -228,7 +229,7 @@ class TestSemanticSearch:
     def test_result_count_capped_at_k(self, mock_vectorstore):
         # Default k=10; sample has 8 docs — all should be returned
         result = semantic_search.invoke("any query")
-        lines = [l for l in result.split("\n\n") if l.strip()]
+        lines = [ln for ln in result.split("\n\n") if ln.strip()]
         assert 1 <= len(lines) <= 10
 
 

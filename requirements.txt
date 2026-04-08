@@ -33,6 +33,9 @@ audio-recorder-streamlit==0.0.10
 # Observability
 python-json-logger==4.1.0
 
-# Testing
+# Testing & dev tooling
 pytest==9.0.3
 pytest-mock==3.15.1
+ruff==0.15.9
+mypy==1.20.0
+pandas-stubs==3.0.0.260204

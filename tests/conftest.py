@@ -4,13 +4,12 @@ tests/conftest.py
 Shared fixtures available to all test modules.
 """
 
-import json
 import os
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 from langchain_core.documents import Document
-from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Ensure OPENAI_API_KEY is set to a dummy value so imports that reference it

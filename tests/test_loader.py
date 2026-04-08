@@ -7,7 +7,6 @@ Tests for data/loader.py — column types, cleaning rules, schema completeness.
 import pandas as pd
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Real-data tests (use the actual CSV)
 # ---------------------------------------------------------------------------

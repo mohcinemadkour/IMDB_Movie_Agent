@@ -1,0 +1,36 @@
+# pyproject.toml — tool configuration for ruff (lint) and mypy (type-check).
+# These settings are consumed by both local developer runs and the CI workflow.
+
+# ---------------------------------------------------------------------------
+# Ruff — fast Python linter (replaces flake8 + isort)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# E — pycodestyle errors  F — pyflakes  W — pycodestyle warnings  I — isort
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line-too-long — not enforced in this project
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "data"]
+
+# ---------------------------------------------------------------------------
+# Mypy — static type checker
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+# Most third-party packages (LangChain, Streamlit, FAISS …) ship no py.typed
+# marker and have no stub packages — suppress the resulting import errors.
+ignore_missing_imports = true
+# The codebase is not fully annotated; don't require annotations on every def.
+disallow_untyped_defs = false
+# Don't type-check bodies of unannotated functions (avoids false positives
+# from LangChain's highly dynamic internals when seen through Any types).
+check_untyped_defs = false
+warn_unused_configs = true
+# Suppress "Returning Any" noise from partially-typed third-party return vals.
+warn_return_any = false

@@ -26,7 +26,7 @@ import time
 from typing import Generator
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.prompts import SYSTEM_PROMPT
 from agent.tools import get_tools
@@ -116,7 +116,7 @@ def build_agent_executor():
 
 def format_chat_history(messages: list[dict]) -> list:
     """Convert Streamlit-style message dicts to LangChain message objects."""
-    history = []
+    history: list[HumanMessage | AIMessage] = []
     for msg in messages:
         if msg["role"] == "user":
             history.append(HumanMessage(content=msg["content"]))
@@ -212,9 +212,10 @@ def stream_agent(
         extra={"query_preview": user_input[:120], "history_turns": len(chat_history)},
     )
 
-    # Track the last non-tool AIMessageChunk; the terminal chunk carries
-    # response_metadata (finish_reason + token_usage) from OpenAI.
-    last_response_chunk: AIMessageChunk | None = None
+    # Track the last non-tool AI message; for streaming backends this is an
+    # AIMessageChunk, for non-streaming (e.g. stubs) it is an AIMessage.
+    # The terminal chunk carries response_metadata (finish_reason + usage).
+    last_response_chunk: AIMessage | None = None
 
     for chunk, _meta in executor.stream(
         {"messages": messages},
