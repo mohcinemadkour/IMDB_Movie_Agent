@@ -11,13 +11,17 @@ LLM selection is controlled by environment variables:
   GEMINI_MODEL  = "gemini-1.5-pro" (default)
 """
 
+import logging
 import os
+import time
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.prompts import SYSTEM_PROMPT
 from agent.tools import get_tools
+
+_LOG = logging.getLogger(__name__)
 
 # Maximum LangGraph recursion steps (each tool call + LLM call = 2 steps).
 # Prevents runaway agents from generating unbounded API spend.
@@ -76,6 +80,17 @@ def run_agent(
     """
     history = format_chat_history(chat_history)
     messages = history + [HumanMessage(content=user_input)]
+
+    _LOG.info(
+        "agent_run_start",
+        extra={
+            "query_length": len(user_input),
+            "query_preview": user_input[:120],
+            "history_turns": len(chat_history),
+        },
+    )
+    t0 = time.perf_counter()
+
     result = executor.invoke(
         {"messages": messages},
         config={"recursion_limit": MAX_AGENT_ITERATIONS},
@@ -93,5 +108,15 @@ def run_agent(
             "completion_tokens": token_usage.get("completion_tokens", 0),
             "total_tokens": token_usage.get("total_tokens", 0),
         }
+
+    _LOG.info(
+        "agent_run_complete",
+        extra={
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "prompt_tokens": usage["prompt_tokens"],
+            "completion_tokens": usage["completion_tokens"],
+            "total_tokens": usage["total_tokens"],
+        },
+    )
 
     return response_text, usage

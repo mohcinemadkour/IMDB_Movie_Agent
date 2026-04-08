@@ -8,12 +8,16 @@ LangChain tools exposed to the agent:
 """
 
 import json
+import logging
+import time
 
 import pandas as pd
 from langchain_core.tools import tool
 
 from data.loader import load_data
 from data.vectorstore import get_vectorstore
+
+_LOG = logging.getLogger(__name__)
 
 # Module-level singletons — initialised lazily on first tool call.
 _df: pd.DataFrame | None = None
@@ -92,6 +96,7 @@ def structured_query(query_json: str) -> str:
     Returns a formatted table of matching movies, or a count if count_only=true.
     """
     df = _get_df().copy()
+    t0 = time.perf_counter()
 
     try:
         params = json.loads(query_json)
@@ -159,7 +164,18 @@ def structured_query(query_json: str) -> str:
     limit = int(params.get("limit", 500))
     # Safety cap: never return more than 500 rows in a single response
     limit = min(limit, 500)
-    return _format_results(df, max_rows=limit)
+    result = _format_results(df, max_rows=limit)
+    _LOG.info(
+        "structured_query executed",
+        extra={
+            "tool": "structured_query",
+            "params": {k: v for k, v in params.items() if k not in ("limit",)},
+            "rows_returned": min(len(df), limit),
+            "total_matches": len(df),
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        },
+    )
+    return result
 
 
 # ── Tool 2: Semantic / similarity search ──────────────────────────────────────
@@ -180,9 +196,11 @@ def semantic_search(query: str) -> str:
     Returns: Top-10 matching movies with title, year, genre, ratings, and plot summary.
     """
     vs = _get_vectorstore()
+    t0 = time.perf_counter()
     results = vs.similarity_search(query, k=10)
 
     if not results:
+        _LOG.info("semantic_search: no results", extra={"tool": "semantic_search", "query": query})
         return "No movies found matching that plot description."
 
     lines = []
@@ -195,6 +213,15 @@ def semantic_search(query: str) -> str:
             f"   Plot: {doc.page_content}"
         )
 
+    _LOG.info(
+        "semantic_search executed",
+        extra={
+            "tool": "semantic_search",
+            "query": query,
+            "results": len(results),
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        },
+    )
     return "\n\n".join(lines)
 
 
@@ -215,6 +242,7 @@ def director_gross_summary(gross_threshold: float = 500_000_000) -> str:
         gross_threshold: Minimum gross earnings per film in USD (default 500,000,000).
     """
     df = _get_df().copy()
+    t0 = time.perf_counter()
     eligible = df[df["Gross"] >= gross_threshold].copy()
 
     if eligible.empty:
@@ -242,6 +270,15 @@ def director_gross_summary(gross_threshold: float = 500_000_000) -> str:
     result_df = (
         pd.DataFrame(rows)
         .sort_values("Films_Above_Threshold", ascending=False)
+    )
+    _LOG.info(
+        "director_gross_summary executed",
+        extra={
+            "tool": "director_gross_summary",
+            "gross_threshold": gross_threshold,
+            "directors_found": len(rows),
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        },
     )
     return result_df.to_string(index=False)
 

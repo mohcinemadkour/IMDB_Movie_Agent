@@ -23,3 +23,6 @@ faiss-cpu==1.13.2
 # Voice I/O
 gTTS==2.5.4
 audio-recorder-streamlit==0.0.10
+
+# Observability
+python-json-logger==4.1.0

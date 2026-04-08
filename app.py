@@ -19,6 +19,11 @@ import openai
 import streamlit as st
 from dotenv import load_dotenv
 
+from logging_config import setup_logging
+
+load_dotenv()
+setup_logging()
+
 _LOG = logging.getLogger(__name__)
 
 load_dotenv()
