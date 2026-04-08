@@ -11,10 +11,15 @@ Features:
 """
 
 import io
+import logging
 import os
+import traceback
 
+import openai
 import streamlit as st
 from dotenv import load_dotenv
+
+_LOG = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -49,8 +54,6 @@ def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
     """Play TTS audio and return the engine name used ('openai'/'gtts') or 'error: ...'."""
     if engine in ("openai", "auto"):
         try:
-            import openai
-
             client = openai.OpenAI()
             audio = client.audio.speech.create(
                 model="tts-1",
@@ -59,8 +62,17 @@ def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
             )
             st.audio(audio.content, format="audio/mp3", autoplay=True)
             return "openai"
+        except openai.AuthenticationError:
+            _LOG.error("OpenAI TTS authentication error.\n%s", traceback.format_exc())
+            return "error: invalid API key"
+        except openai.RateLimitError:
+            _LOG.warning("OpenAI TTS rate limit hit.\n%s", traceback.format_exc())
+            if engine == "openai":
+                return "error: rate limit — try again shortly"
+            # engine == "auto" — fall through to gTTS
         except Exception as exc:
-            if engine == "openai":  # hard-selected — do not fall through
+            _LOG.error("OpenAI TTS error: %s\n%s", exc, traceback.format_exc())
+            if engine == "openai":
                 return f"error: {exc}"
             # engine == "auto" — fall through to gTTS
 
@@ -75,6 +87,7 @@ def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
         st.audio(buf, format="audio/mp3", autoplay=True)
         return "gtts"
     except Exception as exc:
+        _LOG.error("gTTS error: %s\n%s", exc, traceback.format_exc())
         return f"error: {exc}"
 
 
@@ -84,8 +97,6 @@ def _transcribe_audio(audio_data: bytes) -> None:
     On success sets st.session_state["pending_input"] and calls st.rerun().
     On low confidence or failure shows a warning inline.
     """
-    import openai
-
     try:
         with st.spinner("Transcribing…"):
             transcript = openai.OpenAI().audio.transcriptions.create(
@@ -108,7 +119,19 @@ def _transcribe_audio(audio_data: bytes) -> None:
             st.success(f"🎙️ *{transcribed}*")
             st.session_state["pending_input"] = transcribed
             st.rerun()
+    except openai.AuthenticationError:
+        _LOG.error("Whisper authentication error.\n%s", traceback.format_exc())
+        st.error("**Authentication error:** Your OpenAI API key is invalid or expired.")
+    except openai.RateLimitError:
+        _LOG.warning("Whisper rate limit hit.\n%s", traceback.format_exc())
+        st.warning("⚠️ Rate limit reached. Please wait a moment, then try recording again.")
+        st.session_state.pop("_last_audio_hash", None)
+    except openai.APIConnectionError as exc:
+        _LOG.error("Whisper connection error: %s\n%s", exc, traceback.format_exc())
+        st.warning("⚠️ Could not reach OpenAI. Check your network and try again.")
+        st.session_state.pop("_last_audio_hash", None)
     except Exception as exc:
+        _LOG.error("Transcription failed: %s\n%s", exc, traceback.format_exc())
         st.warning(f"Transcription failed: {exc}")
 
 
@@ -257,7 +280,23 @@ if user_input:
                     user_input,
                     st.session_state.messages[:-1],  # history excludes current message
                 )
+            except openai.AuthenticationError:
+                _LOG.error("OpenAI authentication error.\n%s", traceback.format_exc())
+                st.error(
+                    "**Authentication error:** Your OpenAI API key is invalid or expired. "
+                    "Update `OPENAI_API_KEY` in `.env` and restart the app."
+                )
+                st.stop()
+            except openai.RateLimitError:
+                _LOG.warning("OpenAI rate limit hit.\n%s", traceback.format_exc())
+                response = "⚠️ Rate limit reached. Please wait a moment and try your question again."
+                usage = {}
+            except openai.APIConnectionError as exc:
+                _LOG.error("OpenAI connection error: %s\n%s", exc, traceback.format_exc())
+                response = "⚠️ Could not reach the OpenAI API. Check your network connection and try again."
+                usage = {}
             except Exception as exc:
+                _LOG.error("Unexpected agent error: %s\n%s", exc, traceback.format_exc())
                 response = f"⚠️ Something went wrong: {exc}\n\nPlease try rephrasing your question."
                 usage = {}
 
