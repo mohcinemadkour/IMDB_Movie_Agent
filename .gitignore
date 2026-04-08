@@ -20,3 +20,6 @@ logs/
 
 # LLM response cache
 .cache/
+
+# ChromaDB local persistent index
+.chroma/

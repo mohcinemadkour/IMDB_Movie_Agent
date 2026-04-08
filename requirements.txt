@@ -17,8 +17,14 @@ langchain-google-genai==4.2.1
 langchain-community==0.4.1
 langgraph==1.1.6
 
-# Vector store
+# Vector store — FAISS is the default local backend (committed to repo).
+# To use Pinecone or ChromaDB instead, uncomment the relevant lines and
+# set VECTOR_STORE=pinecone or VECTOR_STORE=chroma in your .env.
 faiss-cpu==1.13.2
+# pinecone==5.4.2          # required for VECTOR_STORE=pinecone
+# langchain-pinecone==0.2.0
+# chromadb==0.6.3           # required for VECTOR_STORE=chroma
+# langchain-chroma==0.2.4
 
 # Voice I/O
 gTTS==2.5.4

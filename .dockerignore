@@ -19,6 +19,9 @@ logs/
 # LLM cache — rebuilt at runtime
 .cache/
 
+# ChromaDB local index — rebuilt / mounted at runtime
+.chroma/
+
 # Streamlit local config
 .streamlit/
 
