@@ -117,52 +117,6 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.markdown("**🎤 Voice Input**")
-    try:
-        from audio_recorder_streamlit import audio_recorder  # type: ignore
-        import hashlib
-
-        audio_data = audio_recorder(
-            text="Click to record",
-            icon_size="2x",
-            neutral_color="#6C757D",
-            recording_color="#E74C3C",
-            key="mic_sidebar",
-        )
-        if audio_data is not None and len(audio_data) > 1000:
-            audio_hash = hashlib.md5(audio_data).hexdigest()
-            if audio_hash != st.session_state.get("_last_audio_hash"):
-                st.session_state["_last_audio_hash"] = audio_hash
-                import openai
-                client = openai.OpenAI()
-                try:
-                    with st.spinner("Transcribing…"):
-                        transcript = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=("audio.wav", io.BytesIO(audio_data), "audio/wav"),
-                            language="en",
-                            prompt="IMDB, movie titles, director names, genres like Horror, Comedy, Sci-Fi, actor names",
-                            response_format="verbose_json",
-                        )
-                    segments = getattr(transcript, "segments", []) or []
-                    avg_no_speech = (
-                        sum(getattr(s, "no_speech_prob", 0) for s in segments) / len(segments)
-                        if segments else 0.0
-                    )
-                    transcribed = (transcript.text or "").strip()
-                    if avg_no_speech >= 0.6 or not transcribed:
-                        st.warning(f"⚠️ Low confidence ({avg_no_speech:.0%}). Re-record.")
-                        st.session_state.pop("_last_audio_hash", None)
-                    else:
-                        st.success(f"🎙️ *{transcribed}*")
-                        st.session_state["pending_input"] = transcribed
-                        st.rerun()
-                except Exception as exc:
-                    st.warning(f"Transcription failed: {exc}")
-    except ImportError:
-        st.caption("Install `audio-recorder-streamlit` to enable voice input.")
-
-    st.divider()
     st.markdown("**📋 Example Questions**")
 
     _examples = [
@@ -192,6 +146,64 @@ st.caption(
 )
 
 
+# ── Read input early so we know before rendering whether a response is coming ──
+
+_pending = st.session_state.pop("pending_input", None)
+user_input: str | None = st.chat_input("Ask about movies…") or _pending
+
+
+# ── Mic helper (renders widget + handles transcription) ───────────────────────
+# Always called with the same stable key "mic" so the React component never
+# remounts between reruns — this gives single-click-to-record behaviour.
+
+def _render_mic(key: str) -> None:
+    """Render microphone button and handle Whisper transcription."""
+    try:
+        from audio_recorder_streamlit import audio_recorder  # type: ignore
+        import hashlib
+
+        _mc, _ = st.columns([1, 20])
+        with _mc:
+            _ad = audio_recorder(
+                text="",
+                icon_size="2x",
+                neutral_color="#6C757D",
+                recording_color="#E74C3C",
+                key=key,
+            )
+        if _ad is not None and len(_ad) > 1000:
+            _ah = hashlib.md5(_ad).hexdigest()
+            if _ah != st.session_state.get("_last_audio_hash"):
+                st.session_state["_last_audio_hash"] = _ah
+                import openai as _oai
+                try:
+                    with st.spinner("Transcribing…"):
+                        _tr = _oai.OpenAI().audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("audio.wav", io.BytesIO(_ad), "audio/wav"),
+                            language="en",
+                            prompt="IMDB, movie titles, director names, genres like Horror, Comedy, Sci-Fi, actor names",
+                            response_format="verbose_json",
+                        )
+                    _segs = getattr(_tr, "segments", []) or []
+                    _conf = (
+                        sum(getattr(s, "no_speech_prob", 0) for s in _segs) / len(_segs)
+                        if _segs else 0.0
+                    )
+                    _txt = (_tr.text or "").strip()
+                    if _conf >= 0.6 or not _txt:
+                        st.warning(f"⚠️ Low confidence ({_conf:.0%}). Please re-record.")
+                        st.session_state.pop("_last_audio_hash", None)
+                    else:
+                        st.info(f"🎙️ *{_txt}*")
+                        st.session_state["pending_input"] = _txt
+                        st.rerun()
+                except Exception as _exc:
+                    st.warning(f"Transcription failed: {_exc}")
+    except ImportError:
+        pass
+
+
 # ── Chat history ──────────────────────────────────────────────────────────────
 
 for _msg in st.session_state.messages:
@@ -199,12 +211,7 @@ for _msg in st.session_state.messages:
         st.markdown(_msg["content"])
 
 
-
-
 # ── Input handling ────────────────────────────────────────────────────────────
-
-_pending = st.session_state.pop("pending_input", None)
-user_input: str | None = st.chat_input("Ask about movies…") or _pending
 
 if user_input:
     # Display user message
@@ -238,3 +245,10 @@ if user_input:
                 st.caption("🔊 Spoken via **gTTS** (first 500 chars)")
 
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+
+# ── Mic — always rendered at the same fixed position in the component tree ────
+# Must NOT be inside any conditional or loop — a different structural position
+# causes Streamlit to remount the component and reset its recording state.
+
+_render_mic("mic")
