@@ -119,6 +119,25 @@ requirements.txt
 
 ---
 
+## Observability (LangSmith)
+
+LangChain and LangGraph emit traces automatically when the following variables are set in `.env`:
+
+```dotenv
+LANGCHAIN_TRACING_V2=true
+LANGSMITH_API_KEY=ls__your-key-here
+LANGCHAIN_PROJECT=imdb-movie-agent
+```
+
+Sign up for a free account at [smith.langchain.com](https://smith.langchain.com). Once enabled, every agent invocation appears in the LangSmith UI with:
+- Full reasoning chain (LLM calls + tool calls in order)
+- Per-step latency and token counts
+- Input/output payloads for debugging
+
+No code changes are required — tracing is activated purely by the environment variables.
+
+---
+
 ## Example Queries
 
 - *"When did The Matrix release?"*
