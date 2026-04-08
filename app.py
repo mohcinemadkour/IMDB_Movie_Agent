@@ -50,7 +50,7 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 
 
 # ── Imports (deferred agent import after session-state init) ─────────────────
-from agent.agent import run_agent  # noqa: E402  (module loaded at first import)
+from agent.agent import run_agent, stream_agent  # noqa: E402  (module loaded at first import)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -276,45 +276,49 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Run agent and display response
+    # Run agent and stream response token-by-token into the chat bubble.
+    # st.write_stream() drives the sync generator and returns the full text.
     with st.chat_message("assistant"):
-        with st.spinner("Thinking…"):
-            try:
-                response, usage = run_agent(
+        usage_holder: dict = {}
+        response: str = ""
+        try:
+            response = st.write_stream(
+                stream_agent(
                     st.session_state.agent_executor,
                     user_input,
                     st.session_state.messages[:-1],  # history excludes current message
+                    usage_holder,
                 )
-            except openai.AuthenticationError:
-                _LOG.error("OpenAI authentication error.\n%s", traceback.format_exc())
-                st.error(
-                    "**Authentication error:** Your OpenAI API key is invalid or expired. "
-                    "Update `OPENAI_API_KEY` in `.env` and restart the app."
-                )
-                st.stop()
-            except openai.RateLimitError:
-                _LOG.warning("OpenAI rate limit hit.\n%s", traceback.format_exc())
-                response = "⚠️ Rate limit reached. Please wait a moment and try your question again."
-                usage = {}
-            except openai.APIConnectionError as exc:
-                _LOG.error("OpenAI connection error: %s\n%s", exc, traceback.format_exc())
-                response = "⚠️ Could not reach the OpenAI API. Check your network connection and try again."
-                usage = {}
-            except Exception as exc:
-                _LOG.error("Unexpected agent error: %s\n%s", exc, traceback.format_exc())
-                response = f"⚠️ Something went wrong: {exc}\n\nPlease try rephrasing your question."
-                usage = {}
+            )
+        except openai.AuthenticationError:
+            _LOG.error("OpenAI authentication error.\n%s", traceback.format_exc())
+            st.error(
+                "**Authentication error:** Your OpenAI API key is invalid or expired. "
+                "Update `OPENAI_API_KEY` in `.env` and restart the app."
+            )
+            st.stop()
+        except openai.RateLimitError:
+            _LOG.warning("OpenAI rate limit hit.\n%s", traceback.format_exc())
+            response = "⚠️ Rate limit reached. Please wait a moment and try your question again."
+            st.markdown(response)
+        except openai.APIConnectionError as exc:
+            _LOG.error("OpenAI connection error: %s\n%s", exc, traceback.format_exc())
+            response = "⚠️ Could not reach the OpenAI API. Check your network connection and try again."
+            st.markdown(response)
+        except Exception as exc:
+            _LOG.error("Unexpected agent error: %s\n%s", exc, traceback.format_exc())
+            response = f"⚠️ Something went wrong: {exc}\n\nPlease try rephrasing your question."
+            st.markdown(response)
 
         # Accumulate session token usage (GPT-4o pricing: $2.50/1M prompt, $10/1M completion)
-        if usage.get("total_tokens"):
-            st.session_state.session_tokens += usage["total_tokens"]
+        if usage_holder.get("total_tokens"):
+            st.session_state.session_tokens += usage_holder["total_tokens"]
             st.session_state.session_cost_usd += (
-                usage.get("prompt_tokens", 0) * 2.50 / 1_000_000
-                + usage.get("completion_tokens", 0) * 10.00 / 1_000_000
+                usage_holder.get("prompt_tokens", 0) * 2.50 / 1_000_000
+                + usage_holder.get("completion_tokens", 0) * 10.00 / 1_000_000
             )
-        st.markdown(response)
 
-        if voice_output:
+        if voice_output and response:
             with st.spinner("🔊 Generating audio…"):
                 used = _speak(response, engine=tts_engine, voice=tts_voice)
             if used.startswith("error"):

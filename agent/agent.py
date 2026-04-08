@@ -14,14 +14,19 @@ Caching:
   LLM_CACHE     = "sqlite" (default) | "memory" | "none"
   LLM_CACHE_DB  = path to the SQLite cache file (default: .cache/llm_cache.db)
                   Only used when LLM_CACHE=sqlite.
+
+Streaming:
+  stream_agent() yields response tokens progressively via LangGraph
+  stream_mode="messages".  Use with st.write_stream() in Streamlit.
 """
 
 import logging
 import os
 import time
+from typing import Generator
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from agent.prompts import SYSTEM_PROMPT
 from agent.tools import get_tools
@@ -172,3 +177,86 @@ def run_agent(
     )
 
     return response_text, usage
+
+
+def stream_agent(
+    executor,
+    user_input: str,
+    chat_history: list[dict],
+    usage_out: dict | None = None,
+) -> Generator[str, None, None]:
+    """Sync generator that yields LLM response tokens progressively.
+
+    Designed for use with ``st.write_stream()`` in Streamlit — tokens appear
+    in the chat bubble as they are produced, avoiding a long blank wait.
+
+    LangGraph's ``stream_mode="messages"`` is used so all message events are
+    available.  Tool-call dispatch tokens (function-name / JSON argument chunks)
+    are filtered out; only the final prose response is yielded.
+
+    Args:
+        executor:     Compiled LangGraph agent returned by build_agent_executor().
+        user_input:   The current user message.
+        chat_history: Streamlit-style message dicts for prior turns.
+        usage_out:    Optional mutable dict.  After the generator is exhausted
+                      it is populated with prompt_tokens, completion_tokens,
+                      total_tokens (all int).  Values are 0 if the provider
+                      does not return usage metadata (e.g. Gemini).
+    """
+    history = format_chat_history(chat_history)
+    messages = history + [HumanMessage(content=user_input)]
+
+    t0 = time.perf_counter()
+    _LOG.info(
+        "agent_stream_start",
+        extra={"query_preview": user_input[:120], "history_turns": len(chat_history)},
+    )
+
+    # Track the last non-tool AIMessageChunk; the terminal chunk carries
+    # response_metadata (finish_reason + token_usage) from OpenAI.
+    last_response_chunk: AIMessageChunk | None = None
+
+    for chunk, _meta in executor.stream(
+        {"messages": messages},
+        config={"recursion_limit": MAX_AGENT_ITERATIONS},
+        stream_mode="messages",
+    ):
+        if not isinstance(chunk, AIMessageChunk):
+            # ToolMessage / HumanMessage echoes — ignore
+            continue
+
+        if getattr(chunk, "tool_call_chunks", None):
+            # Agent is deciding which tool to call — skip these tokens
+            continue
+
+        # Track every non-tool AIMessageChunk; the final one (empty content,
+        # finish_reason="stop") carries token-usage metadata from the API.
+        last_response_chunk = chunk
+
+        if isinstance(chunk.content, str) and chunk.content:
+            yield chunk.content
+
+    latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+    # Extract token usage from the terminal chunk's response_metadata.
+    if usage_out is not None:
+        usage_out.update({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+        if last_response_chunk is not None:
+            meta = getattr(last_response_chunk, "response_metadata", {}) or {}
+            tu = meta.get("token_usage", {})
+            if tu:
+                usage_out.update(
+                    {
+                        "prompt_tokens": tu.get("prompt_tokens", 0),
+                        "completion_tokens": tu.get("completion_tokens", 0),
+                        "total_tokens": tu.get("total_tokens", 0),
+                    }
+                )
+
+    _LOG.info(
+        "agent_stream_complete",
+        extra={
+            "latency_ms": latency_ms,
+            **(usage_out if usage_out else {}),
+        },
+    )
