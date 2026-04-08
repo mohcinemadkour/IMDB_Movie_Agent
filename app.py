@@ -14,6 +14,7 @@ import io
 import logging
 import os
 import traceback
+import uuid
 
 import openai
 import streamlit as st
@@ -50,8 +51,11 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 
 
 # ── Imports (deferred agent import after session-state init) ─────────────────
+import data.usage_db as usage_db  # noqa: E402
 from agent.agent import stream_agent  # noqa: E402  (module loaded at first import)
 from agent.tools import init_tool_singletons  # noqa: E402
+
+usage_db.init_db()
 
 # ── Process-level shared resource cache ──────────────────────────────────────
 # @st.cache_resource loads each object exactly ONCE per Streamlit worker process
@@ -178,6 +182,18 @@ if "session_tokens" not in st.session_state:
 if "session_cost_usd" not in st.session_state:
     st.session_state.session_cost_usd = 0.0
 
+if "session_prompt_tokens" not in st.session_state:
+    st.session_state.session_prompt_tokens = 0
+
+if "session_completion_tokens" not in st.session_state:
+    st.session_state.session_completion_tokens = 0
+
+if "session_turns" not in st.session_state:
+    st.session_state.session_turns = 0
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
 if "agent_executor" not in st.session_state:
     from agent.agent import build_agent_executor
     with st.spinner("🔧 Building agent executor…"):
@@ -217,14 +233,43 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.session_tokens = 0
         st.session_state.session_cost_usd = 0.0
+        st.session_state.session_prompt_tokens = 0
+        st.session_state.session_completion_tokens = 0
+        st.session_state.session_turns = 0
         st.rerun()
 
     st.divider()
-    if st.session_state.session_tokens > 0:
-        st.caption(
-            f"**Session usage:** {st.session_state.session_tokens:,} tokens · "
-            f"~${st.session_state.session_cost_usd:.4f}"
-        )
+    _cost_label = (
+        f"📊 Cost · ${st.session_state.session_cost_usd:.4f}"
+        if st.session_state.session_turns > 0
+        else "📊 Cost"
+    )
+    with st.expander(_cost_label, expanded=False):
+        if st.session_state.session_turns == 0:
+            st.caption("No API calls yet this session.")
+        else:
+            _c1, _c2 = st.columns(2)
+            _c1.metric("Turns", st.session_state.session_turns)
+            _c2.metric("Total tokens", f"{st.session_state.session_tokens:,}")
+            _c1, _c2 = st.columns(2)
+            _c1.metric("Prompt", f"{st.session_state.session_prompt_tokens:,}")
+            _c2.metric("Completion", f"{st.session_state.session_completion_tokens:,}")
+            _avg = st.session_state.session_cost_usd / st.session_state.session_turns
+            st.caption(
+                f"Avg per turn: **~${_avg:.4f}**  \n"
+                "_Rates: $2.50/1M prompt · $10.00/1M completion_"
+            )
+        # ── Cross-session analytics from SQLite ──────────────────────────
+        _db = usage_db.get_all_time_stats()
+        if _db["total_turns"] > 0:
+            st.divider()
+            st.caption("**All-time (this machine)**")
+            _c1, _c2 = st.columns(2)
+            _c1.metric("Sessions", _db["total_sessions"])
+            _c2.metric("Turns", _db["total_turns"])
+            _c1, _c2 = st.columns(2)
+            _c1.metric("Tokens", f"{_db['total_tokens']:,}")
+            _c2.metric("Spend", f"${_db['total_cost_usd']:.3f}")
 
     st.divider()
     st.markdown("**🎤 Voice Input**")
@@ -339,11 +384,23 @@ if user_input:
             st.markdown(response)
 
         # Accumulate session token usage (GPT-4o pricing: $2.50/1M prompt, $10/1M completion)
-        if usage_holder.get("total_tokens"):
-            st.session_state.session_tokens += usage_holder["total_tokens"]
-            st.session_state.session_cost_usd += (
-                usage_holder.get("prompt_tokens", 0) * 2.50 / 1_000_000
-                + usage_holder.get("completion_tokens", 0) * 10.00 / 1_000_000
+        _pt = usage_holder.get("prompt_tokens", 0)
+        _ct = usage_holder.get("completion_tokens", 0)
+        _tt = usage_holder.get("total_tokens", 0)
+        _turn_cost = _pt * 2.50 / 1_000_000 + _ct * 10.00 / 1_000_000
+        if _tt:
+            st.session_state.session_tokens += _tt
+            st.session_state.session_prompt_tokens += _pt
+            st.session_state.session_completion_tokens += _ct
+            st.session_state.session_cost_usd += _turn_cost
+            st.session_state.session_turns += 1
+            usage_db.log_turn(
+                session_id=st.session_state.session_id,
+                query_preview=user_input,
+                prompt_tokens=_pt,
+                completion_tokens=_ct,
+                total_tokens=_tt,
+                cost_usd=_turn_cost,
             )
 
         if voice_output and response:
