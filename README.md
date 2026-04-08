@@ -74,15 +74,41 @@ The app opens at `http://localhost:8501` in your browser.
 
 ---
 
+## Features
+
+- **Streaming responses** — LLM tokens are streamed token-by-token into the chat bubble via `st.write_stream()`, eliminating long blank waits.
+- **Voice input** — Click the microphone in the sidebar to record a question; OpenAI Whisper transcribes it automatically.
+- **Voice output** — Toggle the 🔊 Voice Output switch in the sidebar to hear responses read aloud. Choose between OpenAI TTS (`tts-1`, six voices) or the free gTTS fallback, selectable per session.
+- **Shared resource caching** — The IMDB DataFrame and FAISS vector index are loaded once per Streamlit worker process with `@st.cache_resource` and shared across all browser tabs.
+- **LLM response caching** — Repeated identical queries are served from a SQLite cache (`LLM_CACHE=sqlite`, default) to reduce latency and API cost.
+- **Input guard** — User messages are capped at 2,000 characters before being sent to the LLM.
+- **Example questions** — One-click example queries in the sidebar cover the full range of supported query types.
+
+---
+
 ## Model
 
 | Component | Default | Override |
 |-----------|---------|----------|
 | LLM (chat + reasoning) | `gpt-4o` | Set `OPENAI_MODEL=gpt-4-turbo` in `.env` |
 | LLM provider | OpenAI | Set `LLM_PROVIDER=gemini` + `GOOGLE_API_KEY` in `.env` |
+| LLM cache | SQLite (`.cache/llm_cache.db`) | Set `LLM_CACHE=memory` or `LLM_CACHE=none` in `.env` |
 | Speech-to-text | `whisper-1` (OpenAI) | — |
 | Text-to-speech | `tts-1` / `gTTS` (selectable in sidebar) | — |
 | Embeddings | `text-embedding-3-small` (OpenAI) | — |
+| Vector store | FAISS (local) | Set `VECTOR_STORE=pinecone` or `VECTOR_STORE=chroma` in `.env` |
+
+---
+
+## Agent Tools
+
+The LangGraph agent has access to three tools, routed automatically based on the query:
+
+| Tool | When used |
+|------|-----------|
+| `structured_query` | Numeric filters, sorting, director/actor lookups, genre filtering |
+| `semantic_search` | Plot/theme/concept queries (searches the `Overview` column via FAISS) |
+| `director_gross_summary` | "Directors with multiple blockbusters" style aggregation queries |
 
 ---
 
@@ -93,8 +119,9 @@ The repository includes a pre-built FAISS index at `data/faiss_index/`. This ind
 If you ever need to rebuild the index (e.g., after modifying the dataset):
 
 ```python
-from data.vectorstore import build_vectorstore
-build_vectorstore(force_rebuild=True)
+from data.vectorstore import get_vectorstore
+from data.loader import load_data
+get_vectorstore(load_data(), force_rebuild=True)
 ```
 
 ---
@@ -102,20 +129,35 @@ build_vectorstore(force_rebuild=True)
 ## Project Structure
 
 ```
-app.py                  # Streamlit entry point — chat UI + voice input
+app.py                  # Streamlit entry point — chat UI + voice I/O
 agent/
-  agent.py              # LangGraph agent orchestration
-  tools.py              # Structured query, semantic search, director summary tools
+  agent.py              # LangGraph agent: build_agent_executor(), stream_agent(), run_agent()
+  tools.py              # structured_query, semantic_search, director_gross_summary
   prompts.py            # System prompt and few-shot rules
 data/
-  loader.py             # CSV loader with data cleaning
-  vectorstore.py        # FAISS index build / load
-  faiss_index/          # Pre-built vector index (committed)
+  loader.py             # CSV loader with data cleaning (lru_cache)
+  vectorstore.py        # Provider-agnostic vector store (FAISS / Pinecone / ChromaDB)
+  faiss_index/          # Pre-built FAISS index (committed)
 imdb_dataset/
-  imdb_top_1000.csv     # Source data
+  imdb_top_1000.csv     # Source data — do not modify
+logging_config.py       # Structured JSON logging setup
+tests/                  # pytest test suite (114 tests)
+.github/workflows/
+  ci.yml                # CI pipeline: ruff → mypy → pytest on push/PR to master
+pyproject.toml          # ruff + mypy configuration
 requirements.txt
 .env.example
 ```
+
+---
+
+## CI / CD
+
+A GitHub Actions pipeline runs on every push and pull request to `master`:
+
+1. **Lint** — `ruff check` across `agent/`, `data/`, `tests/`, `app.py`
+2. **Type check** — `mypy agent/ data/`
+3. **Tests** — `pytest tests/ -q` (114 tests)
 
 ---
 
@@ -171,5 +213,8 @@ No code changes are required — tracing is activated purely by the environment 
 - *"Top 7 comedy movies 2010–2020 by IMDB rating"*
 - *"Horror movies with meta score > 85 and IMDB rating > 8"*
 - *"Directors with 2 or more movies grossing over $500M"*
+- *"Top 10 movies with over 1M votes but lower gross"*
+- *"Comedy movies involving death or dead people"*
 - *"Movies before 1990 involving police in the plot"*
 - *"Summarize Spielberg's top-rated sci-fi movies"*
+- *"Al Pacino movies grossing over $50M with IMDB ≥ 8"*

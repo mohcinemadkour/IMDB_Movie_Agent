@@ -14,7 +14,6 @@ import io
 import logging
 import os
 import traceback
-import uuid
 
 import openai
 import streamlit as st
@@ -37,10 +36,6 @@ st.set_page_config(
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_INPUT_CHARS = 2000  # truncate user input before sending to the LLM
 
-# GPT-4o pricing (USD per token, as of 2024-11)
-_PROMPT_RATE: float = 2.50 / 1_000_000
-_COMPLETION_RATE: float = 10.00 / 1_000_000
-
 # ── API key guard ─────────────────────────────────────────────────────────────
 if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
     st.error(
@@ -53,11 +48,8 @@ if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 
 
 # ── Imports (deferred agent import after session-state init) ─────────────────
-import data.usage_db as usage_db  # noqa: E402
 from agent.agent import stream_agent  # noqa: E402  (module loaded at first import)
 from agent.tools import init_tool_singletons  # noqa: E402
-
-usage_db.init_db()
 
 # ── Process-level shared resource cache ──────────────────────────────────────
 # @st.cache_resource loads each object exactly ONCE per Streamlit worker process
@@ -177,11 +169,6 @@ def _transcribe_audio(audio_data: bytes) -> None:
 
 _SESSION_DEFAULTS: dict = {
     "messages": [],
-    "session_tokens": 0,
-    "session_cost_usd": 0.0,
-    "session_prompt_tokens": 0,
-    "session_completion_tokens": 0,
-    "session_turns": 0,
 }
 
 
@@ -191,36 +178,10 @@ def _init_session_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = default
 
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = str(uuid.uuid4())
-
     if "agent_executor" not in st.session_state:
         from agent.agent import build_agent_executor
         with st.spinner("🔧 Building agent executor…"):
             st.session_state.agent_executor = build_agent_executor()
-
-
-def _update_usage(usage_holder: dict, user_input: str) -> None:
-    """Accumulate per-turn token usage into session state and persist to DB."""
-    pt = usage_holder.get("prompt_tokens", 0)
-    ct = usage_holder.get("completion_tokens", 0)
-    tt = usage_holder.get("total_tokens", 0)
-    if not tt:
-        return
-    turn_cost = pt * _PROMPT_RATE + ct * _COMPLETION_RATE
-    st.session_state.session_tokens += tt
-    st.session_state.session_prompt_tokens += pt
-    st.session_state.session_completion_tokens += ct
-    st.session_state.session_cost_usd += turn_cost
-    st.session_state.session_turns += 1
-    usage_db.log_turn(
-        session_id=st.session_state.session_id,
-        query_preview=user_input,
-        prompt_tokens=pt,
-        completion_tokens=ct,
-        total_tokens=tt,
-        cost_usd=turn_cost,
-    )
 
 
 _init_session_state()
@@ -259,39 +220,6 @@ with st.sidebar:
         for _k, _v in _SESSION_DEFAULTS.items():
             st.session_state[_k] = _v
         st.rerun()
-
-    st.divider()
-    _cost_label = (
-        f"📊 Cost · ${st.session_state.session_cost_usd:.4f}"
-        if st.session_state.session_turns > 0
-        else "📊 Cost"
-    )
-    with st.expander(_cost_label, expanded=False):
-        if st.session_state.session_turns == 0:
-            st.caption("No API calls yet this session.")
-        else:
-            _c1, _c2 = st.columns(2)
-            _c1.metric("Turns", st.session_state.session_turns)
-            _c2.metric("Total tokens", f"{st.session_state.session_tokens:,}")
-            _c1, _c2 = st.columns(2)
-            _c1.metric("Prompt", f"{st.session_state.session_prompt_tokens:,}")
-            _c2.metric("Completion", f"{st.session_state.session_completion_tokens:,}")
-            _avg = st.session_state.session_cost_usd / st.session_state.session_turns
-            st.caption(
-                f"Avg per turn: **~${_avg:.4f}**  \n"
-                "_Rates: $2.50/1M prompt · $10.00/1M completion_"
-            )
-        # ── Cross-session analytics from SQLite ──────────────────────────
-        _db = usage_db.get_all_time_stats()
-        if _db["total_turns"] > 0:
-            st.divider()
-            st.caption("**All-time (this machine)**")
-            _c1, _c2 = st.columns(2)
-            _c1.metric("Sessions", _db["total_sessions"])
-            _c2.metric("Turns", _db["total_turns"])
-            _c1, _c2 = st.columns(2)
-            _c1.metric("Tokens", f"{_db['total_tokens']:,}")
-            _c2.metric("Spend", f"${_db['total_cost_usd']:.3f}")
 
     st.divider()
     st.markdown("**🎤 Voice Input**")
@@ -374,7 +302,6 @@ if user_input:
     # Run agent and stream response token-by-token into the chat bubble.
     # st.write_stream() drives the sync generator and returns the full text.
     with st.chat_message("assistant"):
-        usage_holder: dict = {}
         response: str = ""
         try:
             response = st.write_stream(
@@ -382,7 +309,6 @@ if user_input:
                     st.session_state.agent_executor,
                     user_input,
                     st.session_state.messages[:-1],  # history excludes current message
-                    usage_holder,
                 )
             )
         except openai.AuthenticationError:
@@ -404,8 +330,6 @@ if user_input:
             _LOG.error("Unexpected agent error: %s\n%s", exc, traceback.format_exc())
             response = f"⚠️ Something went wrong: {exc}\n\nPlease try rephrasing your question."
             st.markdown(response)
-
-        _update_usage(usage_holder, user_input)
 
         if voice_output and response:
             with st.spinner("🔊 Generating audio…"):
