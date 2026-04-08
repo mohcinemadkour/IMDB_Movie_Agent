@@ -14,3 +14,6 @@ data/faiss_index/
 
 # Streamlit cache
 .streamlit/
+
+# Application logs
+logs/
