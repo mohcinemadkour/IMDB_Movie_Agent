@@ -114,7 +114,7 @@ def build_agent_executor():
     return create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
 
 
-def format_chat_history(messages: list[dict]) -> list:
+def format_chat_history(messages: list[dict]) -> list[HumanMessage | AIMessage]:
     """Convert Streamlit-style message dicts to LangChain message objects."""
     history: list[HumanMessage | AIMessage] = []
     for msg in messages:

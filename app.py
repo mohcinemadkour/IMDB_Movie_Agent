@@ -27,8 +27,6 @@ setup_logging()
 
 _LOG = logging.getLogger(__name__)
 
-load_dotenv()
-
 # ── Page config (must be first Streamlit call) ────────────────────────────────
 st.set_page_config(
     page_title="IMDB Movie Agent",
@@ -38,6 +36,10 @@ st.set_page_config(
 
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_INPUT_CHARS = 2000  # truncate user input before sending to the LLM
+
+# GPT-4o pricing (USD per token, as of 2024-11)
+_PROMPT_RATE: float = 2.50 / 1_000_000
+_COMPLETION_RATE: float = 10.00 / 1_000_000
 
 # ── API key guard ─────────────────────────────────────────────────────────────
 if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
@@ -87,7 +89,7 @@ init_tool_singletons(_shared_df, _shared_vs)
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
-    """Play TTS audio and return the engine name used ('openai'/'gtts') or 'error: ...'."""
+    """Generate TTS audio and render a player widget the user can click to play."""
     if engine in ("openai", "auto"):
         try:
             client = openai.OpenAI()
@@ -96,7 +98,7 @@ def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
                 voice=voice,
                 input=text[:4096],
             )
-            st.audio(audio.content, format="audio/mp3", autoplay=True)
+            st.audio(audio.content, format="audio/mp3")
             return "openai"
         except openai.AuthenticationError:
             _LOG.error("OpenAI TTS authentication error.\n%s", traceback.format_exc())
@@ -120,7 +122,7 @@ def _speak(text: str, engine: str = "auto", voice: str = "nova") -> str:
         buf = io.BytesIO()
         tts.write_to_fp(buf)
         buf.seek(0)
-        st.audio(buf, format="audio/mp3", autoplay=True)
+        st.audio(buf, format="audio/mp3")
         return "gtts"
     except Exception as exc:
         _LOG.error("gTTS error: %s\n%s", exc, traceback.format_exc())
@@ -173,38 +175,62 @@ def _transcribe_audio(audio_data: bytes) -> None:
 
 # ── Session state initialisation ──────────────────────────────────────────────
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+_SESSION_DEFAULTS: dict = {
+    "messages": [],
+    "session_tokens": 0,
+    "session_cost_usd": 0.0,
+    "session_prompt_tokens": 0,
+    "session_completion_tokens": 0,
+    "session_turns": 0,
+}
 
-if "session_tokens" not in st.session_state:
-    st.session_state.session_tokens = 0
 
-if "session_cost_usd" not in st.session_state:
-    st.session_state.session_cost_usd = 0.0
+def _init_session_state() -> None:
+    """Seed all session-state keys with their default values on first run."""
+    for key, default in _SESSION_DEFAULTS.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
 
-if "session_prompt_tokens" not in st.session_state:
-    st.session_state.session_prompt_tokens = 0
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
 
-if "session_completion_tokens" not in st.session_state:
-    st.session_state.session_completion_tokens = 0
+    if "agent_executor" not in st.session_state:
+        from agent.agent import build_agent_executor
+        with st.spinner("🔧 Building agent executor…"):
+            st.session_state.agent_executor = build_agent_executor()
 
-if "session_turns" not in st.session_state:
-    st.session_state.session_turns = 0
 
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
+def _update_usage(usage_holder: dict, user_input: str) -> None:
+    """Accumulate per-turn token usage into session state and persist to DB."""
+    pt = usage_holder.get("prompt_tokens", 0)
+    ct = usage_holder.get("completion_tokens", 0)
+    tt = usage_holder.get("total_tokens", 0)
+    if not tt:
+        return
+    turn_cost = pt * _PROMPT_RATE + ct * _COMPLETION_RATE
+    st.session_state.session_tokens += tt
+    st.session_state.session_prompt_tokens += pt
+    st.session_state.session_completion_tokens += ct
+    st.session_state.session_cost_usd += turn_cost
+    st.session_state.session_turns += 1
+    usage_db.log_turn(
+        session_id=st.session_state.session_id,
+        query_preview=user_input,
+        prompt_tokens=pt,
+        completion_tokens=ct,
+        total_tokens=tt,
+        cost_usd=turn_cost,
+    )
 
-if "agent_executor" not in st.session_state:
-    from agent.agent import build_agent_executor
-    with st.spinner("🔧 Building agent executor…"):
-        st.session_state.agent_executor = build_agent_executor()
+
+_init_session_state()
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    voice_output = st.toggle("🔊 Voice Output", value=False)
+    voice_output = st.toggle("🔊 Voice Output", value=True)
 
     if voice_output:
         tts_engine = st.radio(
@@ -230,12 +256,8 @@ with st.sidebar:
         tts_voice = "nova"
 
     if st.button("🗑️ Clear Chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.session_tokens = 0
-        st.session_state.session_cost_usd = 0.0
-        st.session_state.session_prompt_tokens = 0
-        st.session_state.session_completion_tokens = 0
-        st.session_state.session_turns = 0
+        for _k, _v in _SESSION_DEFAULTS.items():
+            st.session_state[_k] = _v
         st.rerun()
 
     st.divider()
@@ -383,25 +405,7 @@ if user_input:
             response = f"⚠️ Something went wrong: {exc}\n\nPlease try rephrasing your question."
             st.markdown(response)
 
-        # Accumulate session token usage (GPT-4o pricing: $2.50/1M prompt, $10/1M completion)
-        _pt = usage_holder.get("prompt_tokens", 0)
-        _ct = usage_holder.get("completion_tokens", 0)
-        _tt = usage_holder.get("total_tokens", 0)
-        _turn_cost = _pt * 2.50 / 1_000_000 + _ct * 10.00 / 1_000_000
-        if _tt:
-            st.session_state.session_tokens += _tt
-            st.session_state.session_prompt_tokens += _pt
-            st.session_state.session_completion_tokens += _ct
-            st.session_state.session_cost_usd += _turn_cost
-            st.session_state.session_turns += 1
-            usage_db.log_turn(
-                session_id=st.session_state.session_id,
-                query_preview=user_input,
-                prompt_tokens=_pt,
-                completion_tokens=_ct,
-                total_tokens=_tt,
-                cost_usd=_turn_cost,
-            )
+        _update_usage(usage_holder, user_input)
 
         if voice_output and response:
             with st.spinner("🔊 Generating audio…"):

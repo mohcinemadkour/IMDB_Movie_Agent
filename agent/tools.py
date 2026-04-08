@@ -20,6 +20,12 @@ from data.vectorstore import get_vectorstore
 _LOG = logging.getLogger(__name__)
 
 # Module-level singletons.
+_MAX_RESULTS: int = 500  # hard cap on rows returned by structured_query
+
+_DISPLAY_COLS: list[str] = [
+    "Series_Title", "Released_Year", "Genre",
+    "IMDB_Rating", "Meta_score", "Director", "Gross",
+]
 # Populated either by init_tool_singletons() (Streamlit path, uses
 # @st.cache_resource objects) or lazily on first tool call (CLI / test path).
 _df: pd.DataFrame | None = None
@@ -56,17 +62,13 @@ def _get_vectorstore():
     return _vectorstore
 
 
-def _format_results(df: pd.DataFrame, max_rows: int = 200) -> str:
+def _format_results(df: pd.DataFrame, max_rows: int = _MAX_RESULTS) -> str:
     """Render a subset of columns as a readable string."""
     if df.empty:
         return "No results found matching the given criteria."
 
     total = len(df)
-    display_cols = [
-        "Series_Title", "Released_Year", "Genre",
-        "IMDB_Rating", "Meta_score", "Director", "Gross",
-    ]
-    available = [c for c in display_cols if c in df.columns]
+    available = [c for c in _DISPLAY_COLS if c in df.columns]
     subset = df[available].head(max_rows).copy()
 
     if "Gross" in subset.columns:
@@ -179,9 +181,9 @@ def structured_query(query_json: str) -> str:
         df = df.sort_values(sort_col, ascending=ascending)
 
     # Default to all results; LLM can pass a smaller limit for "top N" queries
-    limit = int(params.get("limit", 500))
-    # Safety cap: never return more than 500 rows in a single response
-    limit = min(limit, 500)
+    limit = int(params.get("limit", _MAX_RESULTS))
+    # Safety cap: never return more than _MAX_RESULTS rows in a single response
+    limit = min(limit, _MAX_RESULTS)
     result = _format_results(df, max_rows=limit)
     _LOG.info(
         "structured_query executed",
