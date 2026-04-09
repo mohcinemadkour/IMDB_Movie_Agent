@@ -24,7 +24,8 @@ COPY --from=builder /install /usr/local
 COPY . .
 
 # Streamlit writes config/cache here; make it writable for non-root users
-RUN mkdir -p /app/logs /app/.streamlit && chmod -R 777 /app/logs /app/.streamlit
+RUN mkdir -p /app/logs /app/.streamlit /app/data/faiss_index /app/.cache \
+    && chmod -R 777 /app/logs /app/.streamlit /app/data /app/.cache
 
 # Run as non-root for security
 RUN useradd --create-home appuser

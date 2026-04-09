@@ -86,9 +86,15 @@ def _get_faiss(df: pd.DataFrame, force_rebuild: bool = False):
     _LOG.info("Building FAISS index (force_rebuild=%s) …", force_rebuild)
     docs = _build_documents(df)
     vs = FAISS.from_documents(docs, embeddings)
-    index_dir.mkdir(parents=True, exist_ok=True)
-    vs.save_local(_FAISS_INDEX_PATH)
-    _LOG.info("FAISS index saved to %s", _FAISS_INDEX_PATH)
+    try:
+        index_dir.mkdir(parents=True, exist_ok=True)
+        vs.save_local(_FAISS_INDEX_PATH)
+        _LOG.info("FAISS index saved to %s", _FAISS_INDEX_PATH)
+    except PermissionError:
+        _LOG.warning(
+            "PermissionError saving FAISS index to %s — running in-memory only.",
+            _FAISS_INDEX_PATH,
+        )
     return vs
 
 
