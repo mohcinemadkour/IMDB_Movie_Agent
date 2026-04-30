@@ -65,7 +65,7 @@ A GenAI-powered conversational voice agent built with **Streamlit**. Users ask n
 | Responsibility | Detail |
 |---|---|
 | Streamlit page config | Wide layout, page title, icon |
-| API key guard | Stops the app with a clear error if neither `OPENAI_API_KEY` nor `GOOGLE_API_KEY` is set |
+| API key guard | Prompts the user to enter their `OPENAI_API_KEY` directly in the browser; key is stored only in session state and never on disk |
 | Shared resource loading | `@st.cache_resource` loads the DataFrame and FAISS index **once per worker process**, shared across all browser tabs |
 | Session state | `_SESSION_DEFAULTS` + `_init_session_state()` seed `messages` and `agent_executor` per browser session |
 | Streaming UI | `st.write_stream(stream_agent(...))` renders LLM tokens progressively as they arrive |
