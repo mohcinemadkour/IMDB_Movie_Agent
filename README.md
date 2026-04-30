@@ -60,9 +60,17 @@ Open `.env` and add your OpenAI API key:
 OPENAI_API_KEY=sk-your-key-here
 ```
 
+**How to get your API key:**
+1. Go to [https://platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys)
+2. Click "Create new secret key"
+3. Copy the key (starts with `sk-`)
+4. Paste it into `.env` after `OPENAI_API_KEY=`
+
 All available variables are documented in [.env.example](.env.example). The only **required** value is `OPENAI_API_KEY`.
 
 > **Security note:** `.env` is listed in `.gitignore` and must never be committed to version control.
+
+**Alternative:** If you don't have an OpenAI key yet, you can also use Google Gemini by setting `GOOGLE_API_KEY` and `LLM_PROVIDER=gemini` in `.env` (see [.env.example](.env.example) for details).
 
 ### 5. Run the app
 

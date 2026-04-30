@@ -36,14 +36,74 @@ st.set_page_config(
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_INPUT_CHARS = 2000  # truncate user input before sending to the LLM
 
-# ── API key guard ─────────────────────────────────────────────────────────────
-if not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
-    st.error(
-        "**No API key found.**  "
-        "Create a `.env` file in the project root with `OPENAI_API_KEY=sk-...` "
-        "and restart the app.\n\n"
-        "See `.env.example` for the full template."
+# ── API key guard & initialization ──────────────────────────────────────────
+def _check_and_load_api_key() -> bool:
+    """Always ask for API key from the interface (don't use .env). Return True if valid key is set."""
+    # Check if key was set in session state
+    if "api_key" in st.session_state and st.session_state.api_key:
+        os.environ["OPENAI_API_KEY"] = st.session_state.api_key
+        return True
+    
+    # No valid key found — show API key input interface
+    st.markdown("# 🎬 IMDB Movie Agent")
+    st.markdown("### ⚙️ API Key Required")
+    
+    st.info(
+        "To use the IMDB Movie Agent, please enter your API key below. "
+        "Your key will be stored only in this browser session and not saved to disk."
     )
+    
+    # ── Interactive API Key Input ─────────────────────────────────────────────
+    with st.container(border=True):
+        st.markdown("#### 🔑 Enter Your OpenAI API Key")
+        st.markdown("Get your key from [OpenAI Platform](https://platform.openai.com/account/api-keys)")
+        
+        api_key_input = st.text_input(
+            "Paste your OpenAI API key here (starts with sk-)",
+            type="password",
+            placeholder="sk-...",
+            help="Your key is only stored in this browser session and not saved to disk.",
+        )
+        
+        if api_key_input:
+            if api_key_input.startswith("sk-"):
+                st.session_state.api_key = api_key_input
+                os.environ["OPENAI_API_KEY"] = api_key_input
+                st.success("✅ API key set! Reloading app...")
+                st.rerun()
+            else:
+                st.error("❌ Invalid API key. OpenAI keys start with `sk-`")
+    
+    st.markdown("---")
+    st.markdown("#### ❓ Need an API Key?")
+    st.markdown(
+        "1. Visit [OpenAI Platform](https://platform.openai.com/account/api-keys)\n"
+        "2. Click \"Create new secret key\"\n"
+        "3. Copy the key and paste it above\n"
+        "4. Click Enter or wait for auto-reload"
+    )
+    
+    st.markdown("---")
+    st.markdown("#### 🔐 Alternative: Use Google Gemini")
+    st.markdown(
+        "If you prefer Gemini:\n\n"
+        "1. Get a key from [Google AI Studio](https://aistudio.google.com/app/apikeys)\n"
+        "2. Edit `.env` and set:\n"
+    )
+    st.code("GOOGLE_API_KEY=AIza...\nLLM_PROVIDER=gemini", language="bash")
+    st.markdown("3. Restart the app")
+    
+    st.markdown("---")
+    st.markdown(
+        "**ℹ️ Security Note:** Your API key is only stored in your current browser session. "
+        "Refresh the page and you'll need to enter it again."
+    )
+    
+    return False
+
+
+# Check API key before loading any heavy dependencies
+if not _check_and_load_api_key():
     st.stop()
 
 
@@ -151,7 +211,9 @@ def _transcribe_audio(audio_data: bytes) -> None:
             st.rerun()
     except openai.AuthenticationError:
         _LOG.error("Whisper authentication error.\n%s", traceback.format_exc())
-        st.error("**Authentication error:** Your OpenAI API key is invalid or expired.")
+        st.error("**Authentication error:** Your OpenAI API key is invalid or expired. Please re-enter your key.")
+        st.session_state.pop("api_key", None)
+        st.rerun()
     except openai.RateLimitError:
         _LOG.warning("Whisper rate limit hit.\n%s", traceback.format_exc())
         st.warning("⚠️ Rate limit reached. Please wait a moment, then try recording again.")
@@ -313,11 +375,9 @@ if user_input:
             )
         except openai.AuthenticationError:
             _LOG.error("OpenAI authentication error.\n%s", traceback.format_exc())
-            st.error(
-                "**Authentication error:** Your OpenAI API key is invalid or expired. "
-                "Update `OPENAI_API_KEY` in `.env` and restart the app."
-            )
-            st.stop()
+            st.error("**Authentication error:** Your OpenAI API key is invalid or expired. Please re-enter your key.")
+            st.session_state.pop("api_key", None)
+            st.rerun()
         except openai.RateLimitError:
             _LOG.warning("OpenAI rate limit hit.\n%s", traceback.format_exc())
             response = "⚠️ Rate limit reached. Please wait a moment and try your question again."
